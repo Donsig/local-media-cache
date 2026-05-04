@@ -1,0 +1,1624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Syncarr</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body { background: #141210; color: oklch(93% 0.01 80); font-family: 'DM Sans', sans-serif; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #363330; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4a4641; }
+input::placeholder { color: oklch(40% 0.01 75); }
+select option { background: #242220; }
+button { font-family: 'DM Sans', sans-serif; }
+@keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)} }
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)} }
+.fade-in { animation: fadeIn 0.2s ease; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="splash" style="position:fixed;inset:0;background:#141210;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <svg width="20" height="20" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="7" cy="7" r="3" stroke="oklch(70% 0.15 160)" stroke-width="1.3"/>
+      <path d="M7 1v2M7 11v2M1 7h2M11 7h2" stroke="oklch(70% 0.15 160)" stroke-width="1.3" stroke-linecap="round"/>
+      <circle cx="7" cy="7" r="6" stroke="oklch(70% 0.15 160)" stroke-width="1" opacity="0.3"/>
+    </svg>
+    <span style="color:oklch(93% 0.01 80);font-family:'DM Mono',monospace;font-size:16px;font-weight:600;letter-spacing:-0.01em;">syncarr</span>
+  </div>
+  <div style="width:120px;height:2px;background:#2d2b28;border-radius:2px;overflow:hidden;">
+    <div id="splash-bar" style="height:100%;width:0%;background:oklch(70% 0.15 160);border-radius:2px;transition:width 0.3s ease;"></div>
+  </div>
+  <div style="color:oklch(40% 0.01 75);font-family:'DM Mono',monospace;font-size:11px;">initialising…</div>
+</div>
+<script>
+  // Animate the loading bar while Babel compiles
+  let w = 0;
+  const bar = document.getElementById('splash-bar');
+  const iv = setInterval(()=>{ w = Math.min(w + (Math.random()*8), 88); bar.style.width = w+'%'; }, 120);
+  window.__splashDone = function() {
+    clearInterval(iv);
+    bar.style.width = '100%';
+    setTimeout(()=>{ const s=document.getElementById('splash'); if(s) s.style.display='none'; }, 300);
+  };
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+// ═══════════════════════════════════════════════════════════════
+// DESIGN TOKENS
+// ═══════════════════════════════════════════════════════════════
+const T = {
+  bg0:'#141210', bg1:'#1c1917', bg2:'#242220', bg3:'#2d2b28', bg4:'#363330',
+  border:'#363330', border2:'#423f3b',
+  text0:'oklch(93% 0.01 80)', text1:'oklch(75% 0.015 75)',
+  text2:'oklch(55% 0.015 75)', text3:'oklch(40% 0.01 75)',
+  accent:'oklch(70% 0.15 160)', accentDim:'oklch(70% 0.15 160 / 0.15)', accentText:'oklch(75% 0.14 160)',
+  warn:'oklch(72% 0.14 80)', warnDim:'oklch(72% 0.14 80 / 0.15)',
+  error:'oklch(65% 0.18 25)', errorDim:'oklch(65% 0.18 25 / 0.15)',
+  info:'oklch(68% 0.14 240)', infoDim:'oklch(68% 0.14 240 / 0.15)',
+};
+
+// ═══════════════════════════════════════════════════════════════
+// MOCK DATA
+// ═══════════════════════════════════════════════════════════════
+const INIT_PROFILES = [
+  { id:'p1', name:'Caravan SD',   type:'size-first',    codec:'H.264',    resolution:'720p',     gbPerHour:1.2, subscriptions:3 },
+  { id:'p2', name:'Caravan HD',   type:'quality-first', codec:'H.265',    resolution:'1080p',    gbPerHour:2.8, subscriptions:2 },
+  { id:'p3', name:'Passthrough',  type:'passthrough',   codec:'Original', resolution:'Original', gbPerHour:null,subscriptions:1 },
+  { id:'p4', name:'Tiny',         type:'size-first',    codec:'H.264',    resolution:'480p',     gbPerHour:0.6, subscriptions:0 },
+];
+const INIT_CLIENTS = [
+  { id:'c1', name:'Caravan',       ip:'192.168.4.21', lastSeen:'2 minutes ago',  online:true,  storageUsed:142, storageBudget:256, counts:{downloading:3,queued:18,delivered:47,errors:1} },
+  { id:'c2', name:'Holiday House', ip:'10.0.1.44',    lastSeen:'3 days ago',     online:false, storageUsed:89,  storageBudget:128, counts:{downloading:0,queued:0, delivered:31,errors:0} },
+  { id:'c3', name:'Camping Rig',   ip:'192.168.8.5',  lastSeen:'12 minutes ago', online:true,  storageUsed:34,  storageBudget:64,  counts:{downloading:1,queued:4, delivered:12,errors:2} },
+];
+const SHOWS = [
+  { id:'s1', title:'Bluey',           type:'show', genre:'Kids',        year:2018, seasons:[{num:1,episodes:26,sourceGb:18,hours:5.2},{num:2,episodes:26,sourceGb:20,hours:5.4},{num:3,episodes:52,sourceGb:38,hours:10.8}] },
+  { id:'s2', title:'Severance',       type:'show', genre:'Drama',       year:2022, seasons:[{num:1,episodes:9, sourceGb:32,hours:7.5},{num:2,episodes:10,sourceGb:36,hours:8.2}] },
+  { id:'s3', title:'The Bear',        type:'show', genre:'Drama',       year:2022, seasons:[{num:1,episodes:8, sourceGb:22,hours:4.8},{num:2,episodes:10,sourceGb:28,hours:6.1},{num:3,episodes:10,sourceGb:30,hours:6.4}] },
+  { id:'s4', title:'Planet Earth III',type:'show', genre:'Documentary', year:2023, seasons:[{num:1,episodes:8, sourceGb:55,hours:7.5}] },
+  { id:'s5', title:'Slow Horses',     type:'show', genre:'Thriller',    year:2022, seasons:[{num:1,episodes:6,sourceGb:18,hours:4.5},{num:2,episodes:6,sourceGb:18,hours:4.5},{num:3,episodes:6,sourceGb:20,hours:4.8},{num:4,episodes:6,sourceGb:20,hours:4.8}] },
+  { id:'s6', title:'Silo',            type:'show', genre:'Sci-Fi',      year:2023, seasons:[{num:1,episodes:10,sourceGb:42,hours:9.2}] },
+  { id:'s7', title:'Fallout',         type:'show', genre:'Sci-Fi',      year:2024, seasons:[{num:1,episodes:8, sourceGb:38,hours:7.8}] },
+  { id:'s8', title:'Landman',         type:'show', genre:'Drama',       year:2024, seasons:[{num:1,episodes:10,sourceGb:35,hours:8.5}] },
+];
+const MOVIES = [
+  { id:'m1', title:'Dune: Part Two',         type:'movie', genre:'Sci-Fi',   year:2024, sourceGb:48, hours:2.8 },
+  { id:'m2', title:'The Zone of Interest',   type:'movie', genre:'Drama',    year:2023, sourceGb:28, hours:1.8 },
+  { id:'m3', title:'Past Lives',             type:'movie', genre:'Romance',  year:2023, sourceGb:24, hours:1.9 },
+  { id:'m4', title:'Oppenheimer',            type:'movie', genre:'Drama',    year:2023, sourceGb:62, hours:3.0 },
+  { id:'m5', title:'Poor Things',            type:'movie', genre:'Drama',    year:2023, sourceGb:32, hours:2.2 },
+  { id:'m6', title:'Inside Out 2',           type:'movie', genre:'Kids',     year:2024, sourceGb:28, hours:1.6 },
+  { id:'m7', title:'Alien: Romulus',         type:'movie', genre:'Sci-Fi',   year:2024, sourceGb:36, hours:1.9 },
+  { id:'m8', title:'Conclave',               type:'movie', genre:'Thriller', year:2024, sourceGb:30, hours:2.0 },
+];
+const INIT_SUBSCRIPTIONS = {
+  c1:[
+    { id:'sub1', contentId:'s1', title:'Bluey',          scope:'Seasons 2–3',  episodes:78, profileId:'p1', sizeGb:69.6 },
+    { id:'sub2', contentId:'s2', title:'Severance',      scope:'All seasons',  episodes:19, profileId:'p2', sizeGb:38.4 },
+    { id:'sub3', contentId:'m1', title:'Dune: Part Two', scope:'Movie',        episodes:1,  profileId:'p2', sizeGb:7.8  },
+    { id:'sub4', contentId:'s3', title:'The Bear',       scope:'Season 1',     episodes:8,  profileId:'p1', sizeGb:9.6  },
+    { id:'sub5', contentId:'m4', title:'Oppenheimer',    scope:'Movie',        episodes:1,  profileId:'p1', sizeGb:3.6  },
+  ],
+  c2:[
+    { id:'sub6', contentId:'s4', title:'Planet Earth III', scope:'Season 1', episodes:8,  profileId:'p2', sizeGb:22.4 },
+    { id:'sub7', contentId:'m4', title:'Oppenheimer',      scope:'Movie',    episodes:1,  profileId:'p3', sizeGb:62   },
+  ],
+  c3:[
+    { id:'sub8', contentId:'s1', title:'Bluey',       scope:'Season 1', episodes:26, profileId:'p4', sizeGb:9.1 },
+    { id:'sub9', contentId:'m6', title:'Inside Out 2',scope:'Movie',    episodes:1,  profileId:'p4', sizeGb:1.0 },
+  ],
+};
+const INIT_ASSIGNMENTS = [
+  { id:'a1',  title:'Bluey',      episode:'S02E01 – The Beach House',          profile:'Caravan SD', state:'downloading', progress:67, sourceSize:'720 MB',  outputSize:'410 MB', error:null },
+  { id:'a2',  title:'Bluey',      episode:'S02E02 – Hammerbarn',               profile:'Caravan SD', state:'downloading', progress:12, sourceSize:'680 MB',  outputSize:'390 MB', error:null },
+  { id:'a3',  title:'Severance',  episode:'S02E01 – Cold Harbor',              profile:'Caravan HD', state:'downloading', progress:44, sourceSize:'1.8 GB',  outputSize:'1.1 GB', error:null },
+  { id:'a4',  title:'Bluey',      episode:'S02E03 – Bus Ride',                 profile:'Caravan SD', state:'queued',      progress:0,  sourceSize:'650 MB',  outputSize:'370 MB', error:null },
+  { id:'a5',  title:'Bluey',      episode:'S02E04 – Family Meeting',           profile:'Caravan SD', state:'queued',      progress:0,  sourceSize:'670 MB',  outputSize:'380 MB', error:null },
+  { id:'a6',  title:'Severance',  episode:'S02E02 – Goodbye, Mrs. Selvig',     profile:'Caravan HD', state:'queued',      progress:0,  sourceSize:'1.9 GB',  outputSize:'1.2 GB', error:null },
+  { id:'a7',  title:'Severance',  episode:'S01E01 – Good News About Hell',     profile:'Caravan HD', state:'delivered',   progress:100,sourceSize:'2.1 GB',  outputSize:'1.3 GB', error:null },
+  { id:'a8',  title:'Severance',  episode:'S01E02 – Half Loop',                profile:'Caravan HD', state:'delivered',   progress:100,sourceSize:'1.8 GB',  outputSize:'1.1 GB', error:null },
+  { id:'a9',  title:'Dune: Part Two', episode:'Movie',                         profile:'Caravan HD', state:'delivered',   progress:100,sourceSize:'48 GB',   outputSize:'7.8 GB', error:null },
+  { id:'a10', title:'The Bear',   episode:'S01E01 – System',                   profile:'Caravan SD', state:'error',       progress:0,  sourceSize:'1.2 GB',  outputSize:'—',      error:'Transcode failed: codec error' },
+  { id:'a11', title:'Bluey',      episode:'S03E01 – Perfect',                  profile:'Caravan SD', state:'queued',      progress:0,  sourceSize:'710 MB',  outputSize:'405 MB', error:null },
+  { id:'a12', title:'Severance',  episode:'S01E03 – In Perpetuity',            profile:'Caravan HD', state:'delivered',   progress:100,sourceSize:'2.0 GB',  outputSize:'1.2 GB', error:null },
+];
+const INIT_ASSETS = [
+  { id:'as1',  title:'Bluey',            episode:'S02E01', profile:'Caravan SD', state:'ready',      sourceSize:'720 MB', outputSize:'410 MB', clients:['Caravan'] },
+  { id:'as2',  title:'Bluey',            episode:'S02E02', profile:'Caravan SD', state:'transcoding',sourceSize:'680 MB', outputSize:'—',      clients:['Caravan'] },
+  { id:'as3',  title:'Severance',        episode:'S01E01', profile:'Caravan HD', state:'ready',      sourceSize:'2.1 GB', outputSize:'1.3 GB', clients:['Caravan','Holiday House'] },
+  { id:'as4',  title:'Dune: Part Two',   episode:'Movie',  profile:'Caravan HD', state:'ready',      sourceSize:'48 GB',  outputSize:'7.8 GB', clients:['Caravan'] },
+  { id:'as5',  title:'The Bear',         episode:'S01E01', profile:'Caravan SD', state:'failed',     sourceSize:'1.2 GB', outputSize:'—',      clients:['Caravan'] },
+  { id:'as6',  title:'Planet Earth III', episode:'S01E01', profile:'Caravan HD', state:'ready',      sourceSize:'6.8 GB', outputSize:'2.2 GB', clients:['Holiday House'] },
+  { id:'as7',  title:'Bluey',            episode:'S02E03', profile:'Caravan SD', state:'queued',     sourceSize:'650 MB', outputSize:'—',      clients:['Caravan'] },
+  { id:'as8',  title:'Severance',        episode:'S02E01', profile:'Caravan HD', state:'transcoding',sourceSize:'1.8 GB', outputSize:'—',      clients:['Caravan'] },
+  { id:'as9',  title:'Oppenheimer',      episode:'Movie',  profile:'Caravan SD', state:'ready',      sourceSize:'62 GB',  outputSize:'3.6 GB', clients:['Caravan'] },
+  { id:'as10', title:'Inside Out 2',     episode:'Movie',  profile:'Tiny',       state:'ready',      sourceSize:'28 GB',  outputSize:'1.0 GB', clients:['Camping Rig'] },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// ICONS
+// ═══════════════════════════════════════════════════════════════
+const IcoClients = () => <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="1" y="3" width="13" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 12v2M10 12v2M3 14h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor"/></svg>;
+const IcoAssets = () => <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="2" y="2" width="11" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 7.5h5M7.5 5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+const IcoProfiles = () => <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 5h11M2 10h11M6 2v11M9 2v11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+const IcoPlus = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v11M1 6.5h11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+const IcoChevR = () => <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IcoSearch = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3"/><path d="M9.5 9.5l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+const IcoTrash = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M4 3v7a1 1 0 001 1h3a1 1 0 001-1V3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+const IcoRetry = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5A4.5 4.5 0 1 0 6.5 2H4M4 2L2 4M4 2L6 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IcoBack = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IcoWarn = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L13 12H1L7 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M7 5v3M7 10v.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+const IcoFilm = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="12" height="8" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M4 3V11M10 3V11M1 6h2M1 8h2M11 6h2M11 8h2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>;
+const IcoTV = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="9" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M4 13h6M7 11v2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>;
+const IcoClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+const IcoSat = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+    <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.3"/>
+    <path d="M7 1v2M7 11v2M1 7h2M11 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1" opacity="0.3"/>
+  </svg>
+);
+
+// ═══════════════════════════════════════════════════════════════
+// PRIMITIVE COMPONENTS
+// ═══════════════════════════════════════════════════════════════
+function Badge({ label, color='default', dot=false }) {
+  const pal = {
+    default:     { bg:T.bg4,       text:T.text1,      d:T.text3 },
+    green:       { bg:T.accentDim, text:T.accentText, d:T.accent },
+    downloading: { bg:T.infoDim,   text:T.info,       d:T.info },
+    queued:      { bg:T.bg4,       text:T.text2,      d:T.text3 },
+    delivered:   { bg:T.accentDim, text:T.accentText, d:T.accent },
+    error:       { bg:T.errorDim,  text:T.error,      d:T.error },
+    ready:       { bg:T.accentDim, text:T.accentText, d:T.accent },
+    transcoding: { bg:T.infoDim,   text:T.info,       d:T.info },
+    failed:      { bg:T.errorDim,  text:T.error,      d:T.error },
+    online:      { bg:T.accentDim, text:T.accentText, d:T.accent },
+    offline:     { bg:T.bg4,       text:T.text3,      d:T.text3 },
+  };
+  const p = pal[color] || pal.default;
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'2px 8px', borderRadius:4, background:p.bg, color:p.text, fontSize:11, fontFamily:"'DM Mono', monospace", fontWeight:500, whiteSpace:'nowrap' }}>
+      {dot && <span style={{ width:5, height:5, borderRadius:'50%', background:p.d, flexShrink:0 }}></span>}
+      {label}
+    </span>
+  );
+}
+
+function ProgressBar({ value, color=T.accent, height=4, style={} }) {
+  return (
+    <div style={{ width:'100%', height, background:T.bg4, borderRadius:height, overflow:'hidden', ...style }}>
+      <div style={{ width:`${Math.min(100,value)}%`, height:'100%', background:color, borderRadius:height, transition:'width 0.4s ease' }}></div>
+    </div>
+  );
+}
+
+function StorageBar({ used, budget }) {
+  const pct = Math.min(100,(used/budget)*100);
+  const color = pct>90 ? T.error : pct>75 ? T.warn : T.accent;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <ProgressBar value={pct} color={color} height={5} />
+      <div style={{ display:'flex', justifyContent:'space-between', color:T.text2, fontSize:11, fontFamily:"'DM Mono', monospace" }}>
+        <span>{used} GB used</span><span>{budget} GB</span>
+      </div>
+    </div>
+  );
+}
+
+function Btn({ children, variant='default', onClick, disabled, style={}, small=false }) {
+  const [hov, setHov] = useState(false);
+  const bg = variant==='primary' ? (hov?'oklch(72% 0.15 160)':T.accent)
+           : variant==='danger'  ? T.errorDim
+           : variant==='ghost'   ? (hov?T.bg3:'transparent')
+           : (hov?T.bg3:T.bg4);
+  const col = variant==='primary' ? '#0a1a0f' : variant==='danger' ? T.error : variant==='ghost' ? T.text2 : T.text1;
+  const bdr = variant==='primary' ? T.accent : variant==='danger' ? 'transparent' : variant==='ghost' ? 'transparent' : T.border2;
+  return (
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ display:'inline-flex', alignItems:'center', gap:6, padding:small?'5px 10px':'7px 14px', background:bg, color:disabled?T.text3:col, border:`1px solid ${bdr}`, borderRadius:5, cursor:disabled?'not-allowed':'pointer', fontSize:small?12:13, fontFamily:"'DM Sans', sans-serif", fontWeight:500, transition:'background 0.1s', opacity:disabled?.5:1, ...style }}>
+      {children}
+    </button>
+  );
+}
+
+function IconBtn({ title, onClick, children, style={} }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button title={title} onClick={onClick}
+      onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ background:hov?T.bg4:'transparent', border:'none', color:hov?T.text1:T.text2, borderRadius:4, width:28, height:28, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', transition:'background 0.1s, color 0.1s', flexShrink:0, ...style }}>
+      {children}
+    </button>
+  );
+}
+
+function SynInput({ value, onChange, placeholder, style={}, prefixIcon }) {
+  return (
+    <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+      {prefixIcon && <span style={{ position:'absolute', left:9, color:T.text3, pointerEvents:'none', display:'flex' }}>{prefixIcon}</span>}
+      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+        style={{ background:T.bg2, border:`1px solid ${T.border}`, borderRadius:5, color:T.text0, fontSize:13, fontFamily:"'DM Sans', sans-serif", padding:prefixIcon?'7px 12px 7px 30px':'7px 12px', outline:'none', width:'100%', ...style }} />
+    </div>
+  );
+}
+
+function SynSelect({ value, onChange, options, style={} }) {
+  return (
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      style={{ background:T.bg2, border:`1px solid ${T.border}`, borderRadius:5, color:T.text0, fontSize:13, fontFamily:"'DM Sans', sans-serif", padding:'7px 10px', outline:'none', cursor:'pointer', ...style }}>
+      {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function Modal({ open, onClose, title, width=560, children }) {
+  if(!open) return null;
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(2px)' }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg2, border:`1px solid ${T.border2}`, borderRadius:10, width, maxWidth:'95vw', maxHeight:'90vh', overflow:'auto', boxShadow:'0 24px 64px rgba(0,0,0,0.6)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:`1px solid ${T.border}` }}>
+          <span style={{ color:T.text0, fontSize:14, fontWeight:600 }}>{title}</span>
+          <IconBtn onClick={onClose} title="Close"><IcoClose /></IconBtn>
+        </div>
+        <div style={{ padding:20 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({ open, onClose, onConfirm, title, body, confirmLabel='Confirm', danger=false }) {
+  if(!open) return null;
+  return (
+    <Modal open={open} onClose={onClose} title={title} width={400}>
+      <p style={{ color:T.text1, fontSize:14, lineHeight:1.6, marginBottom:20 }}>{body}</p>
+      <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn variant={danger?'danger':'primary'} onClick={()=>{onConfirm();onClose();}}>{confirmLabel}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function SectionLabel({ label }) {
+  return <div style={{ padding:'8px 12px 4px', fontSize:10, fontFamily:"'DM Mono', monospace", fontWeight:600, letterSpacing:'0.1em', color:T.text3, textTransform:'uppercase' }}>{label}</div>;
+}
+
+function PillTabs({ tabs, active, onChange }) {
+  return (
+    <div style={{ display:'flex', gap:2, background:T.bg2, padding:3, borderRadius:6, border:`1px solid ${T.border}` }}>
+      {tabs.map(t=>{
+        const on = t.value===active;
+        return <button key={t.value} onClick={()=>onChange(t.value)} style={{ padding:'5px 12px', borderRadius:4, border:'none', background:on?T.bg4:'transparent', color:on?T.text0:T.text2, fontSize:12, fontFamily:"'DM Sans', sans-serif", fontWeight:on?500:400, cursor:'pointer', transition:'background 0.1s, color 0.1s' }}>{t.label}</button>;
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENT DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+function ClientDashboard({ clients, onSelectClient, onAddSubscription }) {
+  return (
+    <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+        <div>
+          <div style={{ color:T.text0, fontSize:18, fontWeight:600 }}>Clients</div>
+          <div style={{ color:T.text2, fontSize:13, marginTop:2 }}>{clients.length} registered devices</div>
+        </div>
+        <Btn variant="primary"><IcoPlus /> New client</Btn>
+      </div>
+      {clients.map(c=><ClientCard key={c.id} client={c} onSelect={()=>onSelectClient(c)} onAddSub={()=>onAddSubscription(c)} />)}
+    </div>
+  );
+}
+
+function ClientCard({ client, onSelect, onAddSub }) {
+  const [hov, setHov] = useState(false);
+  const { counts } = client;
+  return (
+    <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ background:hov?T.bg3:T.bg2, border:`1px solid ${counts.errors>0?'oklch(65% 0.18 25 / 0.4)':T.border}`, borderRadius:8, padding:20, transition:'background 0.15s, border-color 0.15s' }}>
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:16 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ width:36, height:36, borderRadius:8, background:client.online?T.accentDim:T.bg4, display:'flex', alignItems:'center', justifyContent:'center', color:client.online?T.accent:T.text3, flexShrink:0 }}>
+            <IcoClients />
+          </div>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ color:T.text0, fontSize:15, fontWeight:600, whiteSpace:'nowrap' }}>{client.name}</span>
+              <Badge color={client.online?'online':'offline'} label={client.online?'online':'offline'} dot />
+            </div>
+            <div style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace", marginTop:2 }}>{client.ip} · last seen {client.lastSeen}</div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn small onClick={onAddSub}><IcoPlus /> Subscribe</Btn>
+          <Btn small onClick={onSelect}>Assignments <IcoChevR /></Btn>
+        </div>
+      </div>
+      <div style={{ marginBottom:14 }}><StorageBar used={client.storageUsed} budget={client.storageBudget} /></div>
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+        {counts.downloading>0 && <StatChip label="downloading" count={counts.downloading} color="downloading" pulse />}
+        {counts.queued>0 && <StatChip label="queued" count={counts.queued} color="queued" />}
+        <StatChip label="delivered" count={counts.delivered} color="delivered" />
+        {counts.errors>0 && <StatChip label="errors" count={counts.errors} color="error" />}
+      </div>
+    </div>
+  );
+}
+
+function StatChip({ label, count, color, pulse }) {
+  const pal = {
+    downloading:{ bg:T.infoDim,   text:T.info,       bdr:'oklch(68% 0.14 240 / 0.3)' },
+    queued:     { bg:T.bg4,       text:T.text2,      bdr:T.border2 },
+    delivered:  { bg:T.accentDim, text:T.accentText, bdr:'oklch(70% 0.15 160 / 0.3)' },
+    error:      { bg:T.errorDim,  text:T.error,      bdr:'oklch(65% 0.18 25 / 0.3)' },
+  };
+  const p = pal[color]||pal.queued;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px', borderRadius:5, background:p.bg, border:`1px solid ${p.bdr}`, color:p.text, fontSize:12, fontFamily:"'DM Mono', monospace" }}>
+      {pulse && <span style={{ width:6, height:6, borderRadius:'50%', background:T.info, animation:'pulse-dot 1.5s ease-in-out infinite', flexShrink:0 }}></span>}
+      <span style={{ fontWeight:600 }}>{count}</span>
+      <span style={{ opacity:.7 }}>{label}</span>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ASSIGNMENT LIST
+// ═══════════════════════════════════════════════════════════════
+function AssignmentList({ client, assignments, onBack, onManageSubs, onAddSub }) {
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const stateOpts = [
+    {value:'all',label:'All'},{value:'downloading',label:'Downloading'},
+    {value:'queued',label:'Queued'},{value:'delivered',label:'Delivered'},{value:'error',label:'Errors'},
+  ];
+  const stateOrder = { downloading:0, error:1, queued:2, delivered:3 };
+  const filtered = [...assignments]
+    .filter(a=>(filter==='all'||a.state===filter)&&(!search||a.title.toLowerCase().includes(search.toLowerCase())||a.episode.toLowerCase().includes(search.toLowerCase())))
+    .sort((a,b)=>(stateOrder[a.state]??9)-(stateOrder[b.state]??9));
+  return (
+    <div style={{ padding:24, display:'flex', flexDirection:'column', gap:14, height:'100%', boxSizing:'border-box' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+        <IconBtn onClick={onBack} title="Back"><IcoBack /></IconBtn>
+        <div style={{ flex:1 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ color:T.text0, fontSize:16, fontWeight:600 }}>{client.name}</span>
+            <Badge color={client.online?'online':'offline'} label={client.online?'online':'offline'} dot />
+          </div>
+          <div style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace", marginTop:1 }}>{assignments.length} assignments · {client.storageUsed} GB / {client.storageBudget} GB</div>
+        </div>
+        <Btn small onClick={onManageSubs}>Subscriptions</Btn>
+        <Btn small variant="primary" onClick={onAddSub}><IcoPlus /> Subscribe</Btn>
+      </div>
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+        <PillTabs tabs={stateOpts} active={filter} onChange={setFilter} />
+        <div style={{ flex:1, minWidth:200, maxWidth:320 }}>
+          <SynInput value={search} onChange={setSearch} placeholder="Search…" prefixIcon={<IcoSearch />} />
+        </div>
+      </div>
+      <div style={{ flex:1, overflow:'auto', background:T.bg2, borderRadius:8, border:`1px solid ${T.border}` }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+          <thead>
+            <tr style={{ position:'sticky', top:0, background:T.bg2, zIndex:1 }}>
+              {['Title','Episode','Profile','State','Size',''].map(h=>(
+                <th key={h} style={{ padding:'10px 14px', textAlign:'left', color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", fontWeight:500, letterSpacing:'0.05em', borderBottom:`1px solid ${T.border}`, whiteSpace:'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(a=><AssignRow key={a.id} a={a} />)}
+            {filtered.length===0 && <tr><td colSpan={6} style={{ padding:32, textAlign:'center', color:T.text3, fontSize:13 }}>No assignments match this filter.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AssignRow({ a }) {
+  const [hov, setHov] = useState(false);
+  const sc = { downloading:'downloading', queued:'queued', delivered:'delivered', error:'error' };
+  return (
+    <tr onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{ background:hov?T.bg3:'transparent', transition:'background 0.1s' }}>
+      <td style={{ padding:'10px 14px', color:T.text0, fontWeight:500, whiteSpace:'nowrap', borderBottom:`1px solid ${T.border}` }}>{a.title}</td>
+      <td style={{ padding:'10px 14px', color:T.text1, borderBottom:`1px solid ${T.border}`, maxWidth:240 }}>
+        <div>{a.episode}</div>
+        {a.state==='error'&&a.error&&<div style={{ display:'flex', alignItems:'center', gap:4, color:T.error, fontSize:11, fontFamily:"'DM Mono', monospace", marginTop:3 }}><IcoWarn /> {a.error}</div>}
+        {a.state==='downloading'&&<div style={{ marginTop:6, display:'flex', alignItems:'center', gap:8 }}><ProgressBar value={a.progress} height={3} style={{ flex:1 }} /><span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", flexShrink:0 }}>{a.progress}%</span></div>}
+      </td>
+      <td style={{ padding:'10px 14px', color:T.text2, fontFamily:"'DM Mono', monospace", fontSize:12, whiteSpace:'nowrap', borderBottom:`1px solid ${T.border}` }}>{a.profile}</td>
+      <td style={{ padding:'10px 14px', borderBottom:`1px solid ${T.border}` }}><Badge color={sc[a.state]||'default'} label={a.state} dot /></td>
+      <td style={{ padding:'10px 14px', color:T.text2, fontFamily:"'DM Mono', monospace", fontSize:12, whiteSpace:'nowrap', borderBottom:`1px solid ${T.border}` }}>
+        <div>{a.outputSize!=='—'?a.outputSize:<span style={{ color:T.text3 }}>—</span>}</div>
+        <div style={{ color:T.text3, fontSize:11 }}>src {a.sourceSize}</div>
+      </td>
+      <td style={{ padding:'10px 14px', borderBottom:`1px solid ${T.border}` }}>
+        {a.state==='error'&&<IconBtn title="Retry"><IcoRetry /></IconBtn>}
+      </td>
+    </tr>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SUBSCRIPTION MANAGER
+// ═══════════════════════════════════════════════════════════════
+function SubscriptionManager({ client, subscriptions, profiles, onBack, onAddSub, onRemove }) {
+  const [confirmSub, setConfirmSub] = useState(null);
+  const totalGb = subscriptions.reduce((s,sub)=>s+sub.sizeGb,0);
+  const totalEps = subscriptions.reduce((s,sub)=>s+sub.episodes,0);
+  return (
+    <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16, height:'100%', boxSizing:'border-box' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        <IconBtn onClick={onBack} title="Back"><IcoBack /></IconBtn>
+        <div style={{ flex:1 }}>
+          <div style={{ color:T.text0, fontSize:16, fontWeight:600 }}>{client.name} — Subscriptions</div>
+          <div style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace", marginTop:1 }}>{subscriptions.length} active · {totalEps} episodes · {totalGb.toFixed(1)} GB on disk</div>
+        </div>
+        <Btn variant="primary" onClick={onAddSub}><IcoPlus /> Add subscription</Btn>
+      </div>
+      <div style={{ flex:1, overflow:'auto', display:'flex', flexDirection:'column', gap:8 }}>
+        {subscriptions.map(sub=>{
+          const profile = profiles.find(p=>p.id===sub.profileId);
+          return <SubRow key={sub.id} sub={sub} profile={profile} onRemove={()=>setConfirmSub(sub)} />;
+        })}
+        {subscriptions.length===0&&<div style={{ padding:40, textAlign:'center', color:T.text3, fontSize:14 }}>No subscriptions yet.</div>}
+      </div>
+      {confirmSub&&(
+        <ConfirmModal open={true} onClose={()=>setConfirmSub(null)}
+          onConfirm={()=>onRemove(confirmSub.id)}
+          title="Remove subscription" danger confirmLabel="Remove & evict"
+          body={`Remove "${confirmSub.title}" (${confirmSub.scope})? This will evict ${confirmSub.episodes} file${confirmSub.episodes!==1?'s':''} from ${client.name}.`} />
+      )}
+    </div>
+  );
+}
+
+function SubRow({ sub, profile, onRemove }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ background:hov?T.bg3:T.bg2, border:`1px solid ${T.border}`, borderRadius:7, padding:'14px 16px', display:'flex', alignItems:'center', gap:14, transition:'background 0.15s' }}>
+      <div style={{ width:32, height:32, borderRadius:6, background:T.bg4, display:'flex', alignItems:'center', justifyContent:'center', color:T.text3, flexShrink:0 }}>
+        {sub.scope==='Movie'?<IcoFilm />:<IcoTV />}
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
+          <span style={{ color:T.text0, fontWeight:600, fontSize:14 }}>{sub.title}</span>
+          <span style={{ color:T.text3, fontFamily:"'DM Mono', monospace", fontSize:11 }}>{sub.scope}</span>
+        </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+          {profile&&<Badge label={profile.name} />}
+          <span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{sub.episodes} ep · {sub.sizeGb.toFixed(1)} GB</span>
+        </div>
+      </div>
+      <IconBtn title="Remove" onClick={onRemove} style={{ color:T.error }}><IcoTrash /></IconBtn>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIBRARY DATA
+// ═══════════════════════════════════════════════════════════════
+const LIBRARY_DATA = [
+  { id:'lib-tvshows', name:'TV Shows', icon:'tv', items:[
+    { id:'show-severance', title:'Severance', year:2022, seasons:[
+      { num:1, episodes:[
+        { id:'e-s1-s1e1', code:'S01E01', title:'Good News About Hell',     state:'ready',      sourceGb:2.1, outputGb:1.3, profile:'Caravan HD', clients:['Caravan','Holiday House'], updated:'2025-04-12' },
+        { id:'e-s1-s1e2', code:'S01E02', title:'Half Loop',                state:'ready',      sourceGb:1.8, outputGb:1.1, profile:'Caravan HD', clients:['Caravan'], updated:'2025-04-12' },
+        { id:'e-s1-s1e3', code:'S01E03', title:'In Perpetuity',            state:'ready',      sourceGb:2.0, outputGb:1.2, profile:'Caravan HD', clients:['Caravan'], updated:'2025-04-13' },
+        { id:'e-s1-s1e4', code:'S01E04', title:'The You You Are',          state:'ready',      sourceGb:1.9, outputGb:1.1, profile:'Caravan HD', clients:['Caravan'], updated:'2025-04-13' },
+        { id:'e-s1-s1e5', code:'S01E05', title:'The Grim Barbarity…',      state:'transcoding',sourceGb:2.2, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s1e6', code:'S01E06', title:'Hide and Seek',            state:'queued',     sourceGb:1.7, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s1e7', code:'S01E07', title:'Defiant Jazz',             state:'queued',     sourceGb:2.0, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s1e8', code:'S01E08', title:'What\'s for Dinner?',      state:'queued',     sourceGb:1.8, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s1e9', code:'S01E09', title:'The We We Are',            state:'failed',     sourceGb:2.3, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+      ]},
+      { num:2, episodes:[
+        { id:'e-s1-s2e1', code:'S02E01', title:'Cold Harbor',              state:'transcoding',sourceGb:1.8, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s2e2', code:'S02E02', title:'Goodbye, Mrs. Selvig',     state:'queued',     sourceGb:1.9, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+        { id:'e-s1-s2e3', code:'S02E03', title:'Who Is Alive?',            state:'queued',     sourceGb:2.1, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+      ]},
+    ]},
+    { id:'show-bear', title:'The Bear', year:2022, seasons:[
+      { num:1, episodes:[
+        { id:'e-b-s1e1', code:'S01E01', title:'System',   state:'failed', sourceGb:1.2, outputGb:null,profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-b-s1e2', code:'S01E02', title:'Hands',    state:'queued', sourceGb:1.1, outputGb:null,profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-b-s1e3', code:'S01E03', title:'Brigade',  state:'queued', sourceGb:1.3, outputGb:null,profile:'Caravan SD', clients:[], updated:null },
+      ]},
+    ]},
+    { id:'show-slowhorses', title:'Slow Horses', year:2022, seasons:[
+      { num:1, episodes:[
+        { id:'e-sh-s1e1', code:'S01E01', title:'Failure to Debrief',state:'ready', sourceGb:1.4, outputGb:0.8, profile:'Caravan SD', clients:['Caravan'], updated:'2025-03-20' },
+        { id:'e-sh-s1e2', code:'S01E02', title:'Work',              state:'ready', sourceGb:1.3, outputGb:0.7, profile:'Caravan SD', clients:['Caravan'], updated:'2025-03-20' },
+        { id:'e-sh-s1e3', code:'S01E03', title:'Cicadas',           state:'ready', sourceGb:1.4, outputGb:0.8, profile:'Caravan SD', clients:['Caravan'], updated:'2025-03-21' },
+      ]},
+    ]},
+    { id:'show-silo', title:'Silo', year:2023, seasons:[
+      { num:1, episodes:[
+        { id:'e-silo-s1e1', code:'S01E01', title:'Freedom Day',    state:'ready',  sourceGb:3.8, outputGb:2.1, profile:'Caravan HD', clients:['Holiday House'], updated:'2025-02-10' },
+        { id:'e-silo-s1e2', code:'S01E02', title:'Holston\'s Pick',state:'ready',  sourceGb:3.5, outputGb:1.9, profile:'Caravan HD', clients:['Holiday House'], updated:'2025-02-10' },
+        { id:'e-silo-s1e3', code:'S01E03', title:'Machines',       state:'queued', sourceGb:3.6, outputGb:null,profile:'Caravan HD', clients:[], updated:null },
+      ]},
+    ]},
+  ]},
+  { id:'lib-movies', name:'Movies', icon:'film', items:[
+    { id:'mov-dune2',     title:'Dune: Part Two',       year:2024, seasons:null, sourceGb:48,  outputGb:7.8,  state:'ready',      profile:'Caravan HD', clients:['Caravan'], updated:'2025-04-01' },
+    { id:'mov-opp',       title:'Oppenheimer',          year:2023, seasons:null, sourceGb:62,  outputGb:3.6,  state:'ready',      profile:'Caravan SD', clients:['Caravan'], updated:'2025-03-15' },
+    { id:'mov-pastlives', title:'Past Lives',           year:2023, seasons:null, sourceGb:24,  outputGb:null, state:'queued',     profile:'Caravan SD', clients:[], updated:null },
+    { id:'mov-poor',      title:'Poor Things',          year:2023, seasons:null, sourceGb:32,  outputGb:null, state:'transcoding',profile:'Caravan HD', clients:[], updated:null },
+    { id:'mov-conclave',  title:'Conclave',             year:2024, seasons:null, sourceGb:30,  outputGb:null, state:'failed',     profile:'Caravan HD', clients:[], updated:null },
+    { id:'mov-alien',     title:'Alien: Romulus',       year:2024, seasons:null, sourceGb:36,  outputGb:null, state:'queued',     profile:'Caravan HD', clients:[], updated:null },
+  ]},
+  { id:'lib-cartoons', name:'Cartoons', icon:'tv', items:[
+    { id:'show-bluey', title:'Bluey', year:2018, seasons:[
+      { num:1, episodes:[
+        { id:'e-bl-s1e1', code:'S01E01', title:'Daddy Rabbit',      state:'ready', sourceGb:.72, outputGb:.43, profile:'Caravan SD', clients:['Caravan','Camping Rig'], updated:'2025-01-10' },
+        { id:'e-bl-s1e2', code:'S01E02', title:'Keepy Uppy',        state:'ready', sourceGb:.68, outputGb:.41, profile:'Caravan SD', clients:['Caravan','Camping Rig'], updated:'2025-01-10' },
+        { id:'e-bl-s1e3', code:'S01E03', title:'Neighbours',        state:'ready', sourceGb:.71, outputGb:.42, profile:'Caravan SD', clients:['Caravan','Camping Rig'], updated:'2025-01-10' },
+      ]},
+      { num:2, episodes:[
+        { id:'e-bl-s2e1', code:'S02E01', title:'The Beach House',   state:'downloading', sourceGb:.72, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-bl-s2e2', code:'S02E02', title:'Hammerbarn',        state:'downloading', sourceGb:.68, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-bl-s2e3', code:'S02E03', title:'Bus Ride',          state:'queued',      sourceGb:.65, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-bl-s2e4', code:'S02E04', title:'Family Meeting',    state:'queued',      sourceGb:.67, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+      ]},
+      { num:3, episodes:[
+        { id:'e-bl-s3e1', code:'S03E01', title:'Perfect',           state:'queued', sourceGb:.71, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+        { id:'e-bl-s3e2', code:'S03E02', title:'Stories',           state:'queued', sourceGb:.69, outputGb:null, profile:'Caravan SD', clients:[], updated:null },
+      ]},
+    ]},
+    { id:'show-io2', title:'Inside Out 2', year:2024, seasons:null, sourceGb:28, outputGb:1.0, state:'ready', profile:'Tiny', clients:['Camping Rig'], updated:'2025-02-28' },
+  ]},
+  { id:'lib-dktv', name:'Danish TV', icon:'tv', items:[
+    { id:'show-borgen', title:'Borgen', year:2010, seasons:[
+      { num:1, episodes:[
+        { id:'e-bo-s1e1', code:'S01E01', title:'Afsnit 1', state:'ready', sourceGb:1.8, outputGb:1.0, profile:'Caravan SD', clients:['Holiday House'], updated:'2025-03-01' },
+        { id:'e-bo-s1e2', code:'S01E02', title:'Afsnit 2', state:'ready', sourceGb:1.7, outputGb:0.9, profile:'Caravan SD', clients:['Holiday House'], updated:'2025-03-01' },
+        { id:'e-bo-s1e3', code:'S01E03', title:'Afsnit 3', state:'queued',sourceGb:1.8, outputGb:null,profile:'Caravan SD', clients:[], updated:null },
+      ]},
+    ]},
+    { id:'show-taxa', title:'Taxa', year:1997, seasons:[
+      { num:1, episodes:[
+        { id:'e-ta-s1e1', code:'S01E01', title:'Afsnit 1', state:'ready', sourceGb:1.2, outputGb:0.7, profile:'Caravan SD', clients:['Holiday House'], updated:'2025-01-20' },
+        { id:'e-ta-s1e2', code:'S01E02', title:'Afsnit 2', state:'ready', sourceGb:1.1, outputGb:0.6, profile:'Caravan SD', clients:['Holiday House'], updated:'2025-01-20' },
+      ]},
+    ]},
+  ]},
+  { id:'lib-dkmovies', name:'Danish Movies', icon:'film', items:[
+    { id:'mov-dp', title:'Druk', year:2020, seasons:null, sourceGb:22, outputGb:1.8, state:'ready', profile:'Caravan SD', clients:['Holiday House'], updated:'2025-02-14' },
+    { id:'mov-hunt', title:'Jagten', year:2012, seasons:null, sourceGb:18, outputGb:1.4, state:'ready', profile:'Caravan SD', clients:['Holiday House'], updated:'2025-01-30' },
+    { id:'mov-wend', title:'Wendelboe', year:2023, seasons:null, sourceGb:20, outputGb:null, state:'queued', profile:'Caravan SD', clients:[], updated:null },
+  ]},
+];
+
+function getEpisodeStats(episodes) {
+  const counts = { ready:0, transcoding:0, queued:0, failed:0, downloading:0 };
+  let srcGb=0, outGb=0;
+  for(const e of episodes){
+    counts[e.state]=(counts[e.state]||0)+1;
+    srcGb+=e.sourceGb||0;
+    if(e.outputGb) outGb+=e.outputGb;
+  }
+  return { counts, srcGb, outGb };
+}
+
+function getAllEpisodes(item) {
+  if(!item.seasons) return [{ ...item, code:'Movie', title:item.title }];
+  return item.seasons.flatMap(s=>s.episodes);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ASSET INSPECTOR — COLLAPSIBLE LIBRARY TREE
+// ═══════════════════════════════════════════════════════════════
+function AssetInspector({ assets, profiles, clients }) {
+  const [globalFilter, setGlobalFilter] = useState('all');
+  const [globalSearch, setGlobalSearch] = useState('');
+
+  const stateOpts = [
+    {value:'all',label:'All'},
+    {value:'ready',label:'Ready'},
+    {value:'transcoding',label:'Transcoding'},
+    {value:'downloading',label:'Downloading'},
+    {value:'queued',label:'Queued'},
+    {value:'failed',label:'Failed'},
+  ];
+
+  const allEpisodes = useMemo(()=>{
+    const eps = [];
+    for(const lib of LIBRARY_DATA)
+      for(const item of lib.items)
+        for(const ep of getAllEpisodes(item))
+          eps.push({...ep, _lib:lib.name, _show:item.title});
+    return eps;
+  },[]);
+
+  const totalCount = allEpisodes.length;
+  const isFiltering = globalFilter!=='all' || globalSearch.trim()!=='';
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', boxSizing:'border-box' }}>
+      {/* Toolbar */}
+      <div style={{ padding:'16px 24px 12px', borderBottom:`1px solid ${T.border}`, flexShrink:0, display:'flex', flexDirection:'column', gap:10 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div>
+            <div style={{ color:T.text0, fontSize:18, fontWeight:600 }}>Library</div>
+            <div style={{ color:T.text2, fontSize:13, marginTop:1 }}>{LIBRARY_DATA.length} libraries · {totalCount} assets</div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <PillTabs tabs={stateOpts} active={globalFilter} onChange={setGlobalFilter} />
+          <div style={{ flex:1, minWidth:200, maxWidth:340 }}>
+            <SynInput value={globalSearch} onChange={setGlobalSearch} placeholder="Search all assets…" prefixIcon={<IcoSearch />} />
+          </div>
+          {isFiltering && <Btn small onClick={()=>{setGlobalFilter('all');setGlobalSearch('');}}>Clear</Btn>}
+        </div>
+      </div>
+      {/* Tree */}
+      <div style={{ flex:1, overflow:'auto' }}>
+        <LibraryTree
+          globalFilter={globalFilter}
+          globalSearch={globalSearch}
+          profiles={profiles}
+          clients={clients}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIBRARY TREE — cascade-toggle foldout
+// ═══════════════════════════════════════════════════════════════
+function LibraryTree({ globalFilter, globalSearch, profiles, clients }) {
+  // open state: set of ids that are expanded
+  const [open, setOpen] = useState({});
+  // sync state: { [episodeId]: Set of clientIds }
+  const [syncState, setSyncState] = useState(()=>{
+    const s = {};
+    for(const lib of LIBRARY_DATA)
+      for(const item of lib.items)
+        for(const ep of getAllEpisodes(item))
+          s[ep.id] = new Set(ep.clients||[]);
+    return s;
+  });
+
+  const toggle = id => setOpen(p=>({...p,[id]:!p[id]}));
+
+  // Cascade sync: set all episodes in a set to synced/unsynced for a client
+  function cascadeSync(episodeIds, clientName, value) {
+    setSyncState(prev=>{
+      const next = {...prev};
+      for(const id of episodeIds) {
+        const s = new Set(next[id]||[]);
+        if(value) s.add(clientName); else s.delete(clientName);
+        next[id] = s;
+      }
+      return next;
+    });
+  }
+
+  function toggleEpClient(epId, clientName) {
+    setSyncState(prev=>{
+      const s = new Set(prev[epId]||[]);
+      if(s.has(clientName)) s.delete(clientName); else s.add(clientName);
+      return {...prev,[epId]:s};
+    });
+  }
+
+  // Filter episodes based on global filter/search
+  function epVisible(ep) {
+    const matchState = globalFilter==='all' || ep.state===globalFilter;
+    const matchSearch = !globalSearch || (ep.title+' '+(ep.code||'')).toLowerCase().includes(globalSearch.toLowerCase());
+    return matchState && matchSearch;
+  }
+
+  const stateColor = { ready:'ready', transcoding:'transcoding', queued:'queued', failed:'failed', downloading:'downloading' };
+  const ROW_H = 40; // base row height px
+  const INDENT = 20;
+
+  // SyncToggles: pill buttons for each client, with cascade awareness
+  function SyncToggles({ episodeIds, size='sm' }) {
+    return (
+      <div style={{ display:'flex', gap:5, alignItems:'center' }} onClick={e=>e.stopPropagation()}>
+        {clients.map(c=>{
+          const allOn = episodeIds.every(id=>(syncState[id]||new Set()).has(c.name));
+          const someOn = !allOn && episodeIds.some(id=>(syncState[id]||new Set()).has(c.name));
+          return (
+            <button key={c.id}
+              onClick={()=>cascadeSync(episodeIds, c.name, !allOn)}
+              title={`${allOn?'Remove from':'Sync to'} ${c.name}`}
+              style={{
+                padding: size==='sm' ? '3px 8px' : '4px 10px',
+                borderRadius:4,
+                border:`1px solid ${allOn?T.accent:someOn?T.border2:T.border}`,
+                background: allOn?T.accentDim : someOn?T.bg4 : 'transparent',
+                color: allOn?T.accentText : someOn?T.text2 : T.text3,
+                fontSize:11, fontFamily:"'DM Mono', monospace",
+                cursor:'pointer', display:'flex', alignItems:'center', gap:4,
+                transition:'all 0.12s',
+                opacity: c.online ? 1 : 0.6,
+              }}>
+              <div style={{ width:5, height:5, borderRadius:'50%', background:c.online?T.accent:T.text3, flexShrink:0 }}></div>
+              {c.name}
+              {someOn && <span style={{ fontSize:9, opacity:.7 }}>~</span>}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function statBadges(eps) {
+    const counts = {};
+    for(const e of eps) counts[e.state]=(counts[e.state]||0)+1;
+    return ['downloading','transcoding','failed','queued','ready'].filter(s=>counts[s]).map(s=>(
+      <Badge key={s} color={s} label={`${counts[s]} ${s}`} dot />
+    ));
+  }
+
+  // Row primitives
+  function RowShell({ depth, open:isOpen, onToggle, children, hov, setHov, style={} }) {
+    return (
+      <div
+        onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        onClick={onToggle}
+        style={{ display:'flex', alignItems:'center', gap:8, padding:`6px 16px 6px ${16+depth*INDENT}px`, cursor:'pointer', background:hov?T.bg3:'transparent', transition:'background 0.1s', minHeight:ROW_H, ...style }}>
+        <span style={{ color:T.text3, display:'flex', flexShrink:0, transition:'transform 0.15s', transform:isOpen?'rotate(90deg)':'none' }}><IcoChevR /></span>
+        {children}
+      </div>
+    );
+  }
+
+  // ── Library level (depth 0) ──
+  function LibRow({ lib }) {
+    const [hov, setHov] = useState(false);
+    const isOpen = !!open[lib.id];
+    const allEps = lib.items.flatMap(i=>getAllEpisodes(i));
+    const visibleEps = allEps.filter(epVisible);
+    if(globalFilter!=='all'||globalSearch) { if(!visibleEps.length) return null; }
+    const allEpIds = allEps.map(e=>e.id);
+    return (
+      <div>
+        <RowShell depth={0} open={isOpen} onToggle={()=>toggle(lib.id)} hov={hov} setHov={setHov}
+          style={{ borderBottom:`1px solid ${T.border}` }}>
+          <span style={{ color:T.text3, display:'flex', flexShrink:0 }}>{lib.icon==='film'?<IcoFilm />:<IcoTV />}</span>
+          <span style={{ color:T.text0, fontWeight:600, fontSize:14, flex:1 }}>{lib.name}</span>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            {statBadges(allEps)}
+            <span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{lib.items.length} titles</span>
+            <div onClick={e=>e.stopPropagation()}>
+              <SyncToggles episodeIds={allEpIds} />
+            </div>
+          </div>
+        </RowShell>
+        {isOpen && lib.items.map(item=>{
+          const eps = getAllEpisodes(item);
+          if((globalFilter!=='all'||globalSearch)&&!eps.some(epVisible)) return null;
+          return <ItemRow key={item.id} lib={lib} item={item} />;
+        })}
+      </div>
+    );
+  }
+
+  // ── Show/Movie level (depth 1) ──
+  function ItemRow({ lib, item }) {
+    const [hov, setHov] = useState(false);
+    const isOpen = !!open[item.id];
+    const allEps = getAllEpisodes(item);
+    const allEpIds = allEps.map(e=>e.id);
+    const isMovie = !item.seasons;
+
+    if(isMovie) {
+      // Movie: no fold-out seasons, just a row + episode detail inline
+      const ep = {...item, code:'Movie'};
+      const visible = epVisible(ep);
+      if(!visible) return null;
+      return (
+        <div>
+          <MovieRow ep={ep} depth={1} allEpIds={[ep.id]} SyncToggles={SyncToggles} syncState={syncState} toggleEpClient={toggleEpClient} profiles={profiles} clients={clients} />
+        </div>
+      );
+    }
+
+    if((globalFilter!=='all'||globalSearch)&&!allEps.some(epVisible)) return null;
+
+    return (
+      <div>
+        <RowShell depth={1} open={isOpen} onToggle={()=>toggle(item.id)} hov={hov} setHov={setHov}
+          style={{ borderBottom:`1px solid ${T.border}` }}>
+          <span style={{ color:T.text0, fontWeight:500, fontSize:13, flex:1 }}>{item.title}</span>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{item.year}</span>
+            {statBadges(allEps)}
+            <div onClick={e=>e.stopPropagation()}>
+              <SyncToggles episodeIds={allEpIds} />
+            </div>
+          </div>
+        </RowShell>
+        {isOpen && item.seasons.map(s=>{
+          const sEps = s.episodes.filter(epVisible);
+          if((globalFilter!=='all'||globalSearch)&&!sEps.length) return null;
+          return <SeasonRow key={s.num} item={item} season={s} depth={2} SyncToggles={SyncToggles} syncState={syncState} toggleEpClient={toggleEpClient} profiles={profiles} clients={clients} epVisible={epVisible} open={open} toggle={toggle} stateColor={stateColor} />;
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ fontSize:13 }}>
+      {LIBRARY_DATA.map(lib=><LibRow key={lib.id} lib={lib} />)}
+    </div>
+  );
+}
+
+// ── Season row (depth 2) ──
+function SeasonRow({ item, season, depth, SyncToggles, syncState, toggleEpClient, profiles, clients, epVisible, open, toggle, stateColor }) {
+  const [hov, setHov] = useState(false);
+  const key = item.id+'s'+season.num;
+  const isOpen = !!open[key];
+  const visEps = season.episodes.filter(epVisible);
+  const allEpIds = season.episodes.map(e=>e.id);
+  const counts = {};
+  for(const e of season.episodes) counts[e.state]=(counts[e.state]||0)+1;
+  return (
+    <div>
+      <div
+        onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        onClick={()=>toggle(key)}
+        style={{ display:'flex', alignItems:'center', gap:8, padding:`5px 16px 5px ${16+depth*20}px`, cursor:'pointer', background:hov?T.bg3:'transparent', transition:'background 0.1s', minHeight:36, borderBottom:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text3, display:'flex', flexShrink:0, transition:'transform 0.15s', transform:isOpen?'rotate(90deg)':'none' }}><IcoChevR /></span>
+        <span style={{ color:T.text2, fontFamily:"'DM Mono', monospace", fontSize:12, fontWeight:500, width:28, flexShrink:0 }}>S{String(season.num).padStart(2,'0')}</span>
+        <span style={{ color:T.text1, fontSize:13, flex:1 }}>Season {season.num}</span>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+          {['downloading','transcoding','failed','queued','ready'].filter(s=>counts[s]).map(s=>(
+            <Badge key={s} color={s} label={`${counts[s]}`} dot />
+          ))}
+          <span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{season.episodes.length}ep</span>
+          <div onClick={e=>e.stopPropagation()}>
+            <SyncToggles episodeIds={allEpIds} />
+          </div>
+        </div>
+      </div>
+      {isOpen && visEps.map(ep=>(
+        <EpRow key={ep.id} ep={ep} depth={depth+1} SyncToggles={SyncToggles} syncState={syncState} toggleEpClient={toggleEpClient} profiles={profiles} clients={clients} stateColor={stateColor} open={open} toggle={toggle} />
+      ))}
+    </div>
+  );
+}
+
+// ── Episode row (depth 3) ──
+function EpRow({ ep, depth, SyncToggles, syncState, toggleEpClient, profiles, clients, stateColor, open, toggle }) {
+  const [hov, setHov] = useState(false);
+  const detailKey = 'ep-detail-'+ep.id;
+  const isOpen = !!open[detailKey];
+  return (
+    <div>
+      <div
+        onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        onClick={()=>toggle(detailKey)}
+        style={{ display:'flex', alignItems:'center', gap:8, padding:`5px 16px 5px ${16+depth*20}px`, cursor:'pointer', background:isOpen?T.bg3:hov?T.bg3:'transparent', transition:'background 0.1s', minHeight:34, borderBottom:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text3, display:'flex', flexShrink:0, transition:'transform 0.15s', transform:isOpen?'rotate(90deg)':'none' }}><IcoChevR /></span>
+        <span style={{ color:T.text3, fontFamily:"'DM Mono', monospace", fontSize:11, width:44, flexShrink:0 }}>{ep.code}</span>
+        <span style={{ color:T.text1, fontSize:13, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ep.title}</span>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }} onClick={e=>e.stopPropagation()}>
+          <Badge color={stateColor[ep.state]||'default'} label={ep.state} dot />
+          {ep.outputGb && <span style={{ color:T.text2, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{ep.outputGb.toFixed(1)} GB</span>}
+          {ep.state==='failed' && <IconBtn title="Retry" onClick={e=>{e.stopPropagation();}}><IcoRetry /></IconBtn>}
+          <SyncToggles episodeIds={[ep.id]} size="sm" />
+        </div>
+      </div>
+      {isOpen && (
+        <div style={{ padding:'12px 16px 12px '+(16+(depth+1)*20)+'px', background:T.bg2, borderBottom:`1px solid ${T.border}` }}>
+          <EpDetail ep={ep} profiles={profiles} clients={clients} syncState={syncState} toggleEpClient={toggleEpClient} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Movie row (depth 1, no seasons) ──
+function MovieRow({ ep, depth, SyncToggles, syncState, toggleEpClient, profiles, clients }) {
+  const [hov, setHov] = useState(false);
+  const [detOpen, setDetOpen] = useState(false);
+  const stateColor = { ready:'ready', transcoding:'transcoding', queued:'queued', failed:'failed', downloading:'downloading' };
+  return (
+    <div>
+      <div
+        onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        onClick={()=>setDetOpen(o=>!o)}
+        style={{ display:'flex', alignItems:'center', gap:8, padding:`6px 16px 6px ${16+depth*20}px`, cursor:'pointer', background:detOpen?T.bg3:hov?T.bg3:'transparent', transition:'background 0.1s', minHeight:38, borderBottom:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text3, display:'flex', flexShrink:0, transition:'transform 0.15s', transform:detOpen?'rotate(90deg)':'none' }}><IcoChevR /></span>
+        <span style={{ color:T.text3, display:'flex', flexShrink:0 }}><IcoFilm /></span>
+        <span style={{ color:T.text0, fontWeight:500, fontSize:13, flex:1 }}>{ep.title}</span>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }} onClick={e=>e.stopPropagation()}>
+          <span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{ep.year}</span>
+          <Badge color={stateColor[ep.state]||'default'} label={ep.state} dot />
+          {ep.outputGb && <span style={{ color:T.text2, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{ep.outputGb.toFixed(1)} GB</span>}
+          {ep.state==='failed' && <IconBtn title="Retry" onClick={e=>{e.stopPropagation();}}><IcoRetry /></IconBtn>}
+          <SyncToggles episodeIds={[ep.id]} size="sm" />
+        </div>
+      </div>
+      {detOpen && (
+        <div style={{ padding:'12px 16px 12px '+(16+(depth+1)*20)+'px', background:T.bg2, borderBottom:`1px solid ${T.border}` }}>
+          <EpDetail ep={ep} profiles={profiles} clients={clients} syncState={syncState} toggleEpClient={toggleEpClient} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Episode detail panel ──
+function EpDetail({ ep, profiles, clients, syncState, toggleEpClient }) {
+  const [selProfile, setSelProfile] = useState(ep.profile||profiles[0]?.name||'');
+  const synced = syncState[ep.id]||new Set();
+  return (
+    <div style={{ display:'flex', gap:24, flexWrap:'wrap', alignItems:'flex-start' }}>
+      <div style={{ minWidth:180 }}>
+        <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:6 }}>TRANSCODE PROFILE</div>
+        <select value={selProfile} onChange={e=>setSelProfile(e.target.value)}
+          style={{ background:T.bg3, border:`1px solid ${T.border}`, borderRadius:5, color:T.text0, fontSize:12, fontFamily:"'DM Mono', monospace", padding:'6px 8px', outline:'none', cursor:'pointer', width:'100%' }}>
+          {profiles.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:6 }}>SYNC TO CLIENTS</div>
+        <div style={{ display:'flex', gap:6 }}>
+          {clients.map(c=>{
+            const on = synced.has(c.name);
+            return (
+              <button key={c.id} onClick={()=>toggleEpClient(ep.id, c.name)}
+                style={{ padding:'5px 10px', borderRadius:5, border:`1px solid ${on?T.accent:T.border2}`, background:on?T.accentDim:T.bg4, color:on?T.accentText:T.text2, fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:5, transition:'all 0.1s' }}>
+                <div style={{ width:6, height:6, borderRadius:'50%', background:c.online?T.accent:T.text3 }}></div>
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:6 }}>SIZE</div>
+        <div style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace" }}>
+          {ep.sourceGb?.toFixed(2)} GB src → {ep.outputGb ? ep.outputGb.toFixed(2)+' GB out' : 'pending'}
+        </div>
+      </div>
+      {ep.updated && (
+        <div>
+          <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:6 }}>TRANSCODED</div>
+          <div style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{ep.updated}</div>
+        </div>
+      )}
+      {ep.state==='failed' && (
+        <div style={{ marginLeft:'auto' }}>
+          <Btn variant="danger" small><IcoRetry /> Retry transcode</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// (old nav components removed — LibraryTree is the only asset view)
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// PROFILE MANAGER
+// ═══════════════════════════════════════════════════════════════
+function ProfileManager({ profiles, onProfileChange }) {
+  const [editing, setEditing] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const typeLabels = {'quality-first':'Quality-first','size-first':'Size-first','passthrough':'Passthrough','custom':'Custom'};
+  return (
+    <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+        <div>
+          <div style={{ color:T.text0, fontSize:18, fontWeight:600 }}>Profiles</div>
+          <div style={{ color:T.text2, fontSize:13, marginTop:2 }}>Transcoding presets</div>
+        </div>
+        <Btn variant="primary" onClick={()=>setEditing({id:null,name:'',type:'size-first',codec:'H.264',resolution:'720p',gbPerHour:1.5})}><IcoPlus /> New profile</Btn>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {profiles.map(p=>(
+          <div key={p.id} style={{ background:T.bg2, border:`1px solid ${T.border}`, borderRadius:7, padding:'16px 18px', display:'flex', alignItems:'center', gap:16 }}>
+            <div style={{ width:40, height:40, borderRadius:8, background:T.bg4, display:'flex', alignItems:'center', justifyContent:'center', color:T.text3, flexShrink:0 }}><IcoProfiles /></div>
+            <div style={{ flex:1 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
+                <span style={{ color:T.text0, fontWeight:600, fontSize:14 }}>{p.name}</span>
+                <Badge label={typeLabels[p.type]||p.type} />
+              </div>
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+                <span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{p.codec}</span>
+                <span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{p.resolution}</span>
+                {p.gbPerHour&&<span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>~{p.gbPerHour} GB/hr</span>}
+                <span style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{p.subscriptions} subscription{p.subscriptions!==1?'s':''}</span>
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              <Btn small onClick={()=>setEditing(p)}>Edit</Btn>
+              <Btn small variant="danger" disabled={p.subscriptions>0} onClick={()=>setConfirmDel(p)}><IcoTrash /></Btn>
+            </div>
+          </div>
+        ))}
+      </div>
+      <Modal open={!!editing} onClose={()=>setEditing(null)} title={editing?.id?'Edit profile':'New profile'} width={440}>
+        {editing&&<ProfileForm profile={editing} onSave={p=>{onProfileChange('save',p);setEditing(null);}} onCancel={()=>setEditing(null)} />}
+      </Modal>
+      {confirmDel&&<ConfirmModal open={true} onClose={()=>setConfirmDel(null)} onConfirm={()=>{onProfileChange('delete',confirmDel);setConfirmDel(null);}} title="Delete profile" danger confirmLabel="Delete" body={`Delete profile "${confirmDel.name}"? This cannot be undone.`} />}
+    </div>
+  );
+}
+
+function ProfileForm({ profile, onSave, onCancel }) {
+  const [form, setForm] = useState({...profile});
+  const set = (k,v)=>setForm(f=>({...f,[k]:v}));
+  const Label = ({children})=><label style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace", display:'block', marginBottom:5 }}>{children}</label>;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      <div><Label>NAME</Label><SynInput value={form.name} onChange={v=>set('name',v)} placeholder="e.g. Caravan HD" /></div>
+      <div><Label>TYPE</Label><SynSelect value={form.type} onChange={v=>set('type',v)} style={{ width:'100%' }} options={[{value:'quality-first',label:'Quality-first'},{value:'size-first',label:'Size-first'},{value:'passthrough',label:'Passthrough'},{value:'custom',label:'Custom'}]} /></div>
+      <div style={{ display:'flex', gap:12 }}>
+        <div style={{ flex:1 }}><Label>CODEC</Label><SynSelect value={form.codec} onChange={v=>set('codec',v)} style={{ width:'100%' }} options={[{value:'H.264',label:'H.264'},{value:'H.265',label:'H.265'},{value:'AV1',label:'AV1'},{value:'Original',label:'Original'}]} /></div>
+        <div style={{ flex:1 }}><Label>RESOLUTION</Label><SynSelect value={form.resolution} onChange={v=>set('resolution',v)} style={{ width:'100%' }} options={[{value:'480p',label:'480p'},{value:'720p',label:'720p'},{value:'1080p',label:'1080p'},{value:'4K',label:'4K'},{value:'Original',label:'Original'}]} /></div>
+      </div>
+      {form.type!=='passthrough'&&<div><Label>EST. GB / HOUR</Label><SynInput value={form.gbPerHour||''} onChange={v=>set('gbPerHour',parseFloat(v)||'')} placeholder="e.g. 1.5" /></div>}
+      <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:6, borderTop:`1px solid ${T.border}`, paddingTop:16 }}>
+        <Btn onClick={onCancel}>Cancel</Btn>
+        <Btn variant="primary" disabled={!form.name} onClick={()=>onSave(form)}>Save profile</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONTENT PICKER (4-step modal)
+// ═══════════════════════════════════════════════════════════════
+function ContentPicker({ shows, movies, profiles, client, onConfirm, onClose }) {
+  const [step, setStep] = useState('browse');
+  const [search, setSearch] = useState('');
+  const [typeF, setTypeF] = useState('all');
+  const [genreF, setGenreF] = useState('all');
+  const [selContent, setSelContent] = useState(null);
+  const [selSeasons, setSelSeasons] = useState([]);
+  const [selProfile, setSelProfile] = useState(profiles[0]?.id||'');
+
+  const allContent = useMemo(()=>[...shows,...movies],[]);
+  const genres = useMemo(()=>['all',...Array.from(new Set(allContent.map(c=>c.genre))).sort()],[]);
+  const filtered = allContent.filter(c=>(typeF==='all'||c.type===typeF)&&(genreF==='all'||c.genre===genreF)&&(!search||c.title.toLowerCase().includes(search.toLowerCase())));
+  const profile = profiles.find(p=>p.id===selProfile);
+
+  const confirmStats = useMemo(()=>{
+    if(!selContent||!profile) return null;
+    if(selContent.type==='movie'){
+      const src=selContent.sourceGb;
+      const out=profile.type==='passthrough'?src:(profile.gbPerHour*selContent.hours);
+      return{episodes:1,sourceGb:src,outputGb:out,scope:'Movie'};
+    }
+    const seasons=selContent.seasons.filter(s=>selSeasons.includes(s.num));
+    if(!seasons.length) return null;
+    const episodes=seasons.reduce((s,ss)=>s+ss.episodes,0);
+    const sourceGb=seasons.reduce((s,ss)=>s+ss.sourceGb,0);
+    const hours=seasons.reduce((s,ss)=>s+ss.hours,0);
+    const outputGb=profile.type==='passthrough'?sourceGb:(profile.gbPerHour*hours);
+    const scope=seasons.length===selContent.seasons.length?'All seasons':seasons.length===1?`Season ${seasons[0].num}`:`Seasons ${seasons.map(s=>s.num).join(', ')}`;
+    return{episodes,sourceGb,outputGb,scope};
+  },[selContent,selSeasons,profile]);
+
+  function pickContent(c){
+    setSelContent(c);
+    if(c.type==='movie'){setSelSeasons([]);setStep('profile');}
+    else{setSelSeasons(c.seasons.map(s=>s.num));setStep('seasons');}
+  }
+  function toggleSeason(n){setSelSeasons(prev=>prev.includes(n)?prev.filter(x=>x!==n):[...prev,n]);}
+
+  const estGb = (p,c,ss)=>{
+    if(!p||!c) return 0;
+    if(c.type==='movie') return p.gbPerHour?(p.gbPerHour*c.hours):c.sourceGb;
+    const hrs=c.seasons.filter(s=>ss.includes(s.num)).reduce((a,s)=>a+s.hours,0);
+    return p.gbPerHour?(p.gbPerHour*hrs):0;
+  };
+
+  const stepList = selContent?.type==='movie'
+    ? [{k:'browse',l:'1  Browse'},{k:'profile',l:'2  Profile'},{k:'confirm',l:'3  Confirm'}]
+    : [{k:'browse',l:'1  Browse'},{k:'seasons',l:'2  Select'},{k:'profile',l:'3  Profile'},{k:'confirm',l:'4  Confirm'}];
+  const curIdx = stepList.findIndex(s=>s.k===step);
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+      {/* Step bar */}
+      <div style={{ padding:'11px 20px', display:'flex', alignItems:'center', gap:8, borderBottom:`1px solid ${T.border}`, flexShrink:0 }}>
+        {stepList.map((s,i)=>{
+          const done=i<curIdx; const active=i===curIdx;
+          return (
+            <React.Fragment key={s.k}>
+              <div style={{ fontSize:12, fontFamily:"'DM Mono', monospace", color:active?T.text0:done?T.accentText:T.text3, fontWeight:active?600:400, cursor:done?'pointer':'default' }}
+                onClick={()=>done&&setStep(s.k)}>
+                {done?<span style={{ color:T.accent }}>✓ </span>:''}{s.l}
+              </div>
+              {i<stepList.length-1&&<span style={{ color:T.text3, display:'flex' }}><IcoChevR /></span>}
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      <div style={{ flex:1, overflow:'auto' }}>
+        {/* Browse */}
+        {step==='browse'&&(
+          <div style={{ padding:18, display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:180 }}><SynInput value={search} onChange={setSearch} placeholder="Search library…" prefixIcon={<IcoSearch />} /></div>
+              <SynSelect value={typeF} onChange={setTypeF} options={[{value:'all',label:'All types'},{value:'show',label:'TV Shows'},{value:'movie',label:'Movies'}]} />
+              <SynSelect value={genreF} onChange={setGenreF} options={genres.map(g=>({value:g,label:g==='all'?'All genres':g}))} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+              {filtered.length===0&&<div style={{ padding:32, textAlign:'center', color:T.text3, fontSize:13 }}>No results.</div>}
+              {filtered.map(c=><PickerRow key={c.id} content={c} onSelect={()=>pickContent(c)} />)}
+            </div>
+          </div>
+        )}
+
+        {/* Seasons */}
+        {step==='seasons'&&selContent?.type==='show'&&(
+          <div style={{ padding:18, display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <button onClick={()=>setStep('browse')} style={{ background:'none', border:'none', color:T.text2, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, padding:0 }}><IcoBack /> Back</button>
+              <span style={{ color:T.text0, fontWeight:600, fontSize:15 }}>{selContent.title}</span>
+              <span style={{ color:T.text3, fontSize:13 }}>— select seasons</span>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <Btn small onClick={()=>setSelSeasons(selContent.seasons.map(s=>s.num))}>All</Btn>
+              <Btn small onClick={()=>setSelSeasons([])}>None</Btn>
+            </div>
+            {selContent.seasons.map(season=>{
+              const on=selSeasons.includes(season.num);
+              return (
+                <div key={season.num} onClick={()=>toggleSeason(season.num)}
+                  style={{ background:on?T.accentDim:T.bg2, border:`1px solid ${on?T.accent:T.border}`, borderRadius:7, padding:'13px 15px', display:'flex', alignItems:'center', gap:14, cursor:'pointer', transition:'all 0.15s' }}>
+                  <div style={{ width:22, height:22, borderRadius:5, background:on?T.accent:T.bg4, border:`1.5px solid ${on?T.accent:T.border2}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    {on&&<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5 4.5-4.5" stroke="#0a1a0f" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:on?T.accentText:T.text0, fontWeight:600, fontSize:14, marginBottom:3 }}>Season {season.num}</div>
+                    <div style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{season.episodes} episodes · {season.sourceGb} GB source</div>
+                  </div>
+                  {on&&profile&&<div style={{ textAlign:'right' }}>
+                    <div style={{ color:T.accentText, fontSize:13, fontFamily:"'DM Mono', monospace", fontWeight:500 }}>~{(profile.gbPerHour*season.hours).toFixed(1)} GB</div>
+                    <div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>at {profile.name}</div>
+                  </div>}
+                </div>
+              );
+            })}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:4 }}>
+              <Btn onClick={()=>setStep('browse')}>Back</Btn>
+              <Btn variant="primary" disabled={selSeasons.length===0} onClick={()=>setStep('profile')}>Choose profile <IcoChevR /></Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Profile */}
+        {step==='profile'&&(
+          <div style={{ padding:18, display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <button onClick={()=>setStep(selContent?.type==='movie'?'browse':'seasons')} style={{ background:'none', border:'none', color:T.text2, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, padding:0 }}><IcoBack /> Back</button>
+              <span style={{ color:T.text0, fontWeight:600, fontSize:15 }}>{selContent?.title}</span>
+              <span style={{ color:T.text3, fontSize:13 }}>— choose profile</span>
+            </div>
+            {profiles.map(p=>{
+              const on=selProfile===p.id;
+              const est=estGb(p,selContent,selSeasons);
+              return (
+                <div key={p.id} onClick={()=>setSelProfile(p.id)}
+                  style={{ background:on?T.accentDim:T.bg2, border:`1px solid ${on?T.accent:T.border}`, borderRadius:7, padding:'13px 15px', display:'flex', alignItems:'center', gap:14, cursor:'pointer', transition:'all 0.15s' }}>
+                  <div style={{ width:22, height:22, borderRadius:'50%', background:on?T.accent:T.bg4, border:`1.5px solid ${on?T.accent:T.border2}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    {on&&<div style={{ width:8, height:8, borderRadius:'50%', background:'#0a1a0f' }}></div>}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:on?T.accentText:T.text0, fontWeight:600, fontSize:14, marginBottom:3 }}>{p.name}</div>
+                    <div style={{ color:T.text2, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{p.codec} · {p.resolution}{p.gbPerHour?` · ~${p.gbPerHour} GB/hr`:''}</div>
+                  </div>
+                  {est>0&&<div style={{ textAlign:'right' }}>
+                    <div style={{ color:on?T.accentText:T.text2, fontSize:13, fontFamily:"'DM Mono', monospace", fontWeight:500 }}>~{est.toFixed(1)} GB</div>
+                    <div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>estimated</div>
+                  </div>}
+                </div>
+              );
+            })}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:4 }}>
+              <Btn onClick={()=>setStep(selContent?.type==='movie'?'browse':'seasons')}>Back</Btn>
+              <Btn variant="primary" onClick={()=>setStep('confirm')}>Preview <IcoChevR /></Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Confirm */}
+        {step==='confirm'&&confirmStats&&(
+          <div style={{ padding:22, display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <button onClick={()=>setStep('profile')} style={{ background:'none', border:'none', color:T.text2, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, padding:0 }}><IcoBack /> Back</button>
+              <span style={{ color:T.text0, fontWeight:600, fontSize:15 }}>Confirm subscription</span>
+            </div>
+            <div style={{ background:T.bg3, border:`1px solid ${T.border2}`, borderRadius:8, padding:18, display:'flex', flexDirection:'column', gap:14 }}>
+              <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+                <div style={{ width:38, height:38, borderRadius:8, background:T.accentDim, display:'flex', alignItems:'center', justifyContent:'center', color:T.accent }}>
+                  {selContent?.type==='movie'?<IcoFilm />:<IcoTV />}
+                </div>
+                <div>
+                  <div style={{ color:T.text0, fontWeight:600, fontSize:16 }}>{selContent?.title}</div>
+                  <div style={{ color:T.text2, fontSize:13, fontFamily:"'DM Mono', monospace" }}>{confirmStats.scope}</div>
+                </div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                {[{l:'Target client',v:client.name},{l:'Profile',v:profile?.name||'—'},{l:'Episodes to queue',v:String(confirmStats.episodes),a:true},{l:'Source size',v:`~${confirmStats.sourceGb.toFixed(0)} GB`}].map(x=>(
+                  <div key={x.l} style={{ background:T.bg4, borderRadius:5, padding:'10px 12px' }}>
+                    <div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", marginBottom:3 }}>{x.l.toUpperCase()}</div>
+                    <div style={{ color:x.a?T.accentText:T.text0, fontSize:14, fontFamily:"'DM Mono', monospace", fontWeight:600 }}>{x.v}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Size reduction */}
+              <div style={{ background:T.bg4, borderRadius:6, padding:'13px 15px', display:'flex', flexDirection:'column', gap:8 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div><div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", marginBottom:2 }}>SOURCE</div>
+                    <div style={{ color:T.text1, fontSize:18, fontFamily:"'DM Mono', monospace", fontWeight:600 }}>~{confirmStats.sourceGb.toFixed(0)} GB</div></div>
+                  <div style={{ color:T.text3, fontSize:18 }}>→</div>
+                  <div style={{ textAlign:'right' }}><div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", marginBottom:2 }}>TRANSCODED</div>
+                    <div style={{ color:T.accentText, fontSize:18, fontFamily:"'DM Mono', monospace", fontWeight:600 }}>~{confirmStats.outputGb.toFixed(0)} GB</div></div>
+                </div>
+                <div style={{ height:6, background:T.bg3, borderRadius:4, overflow:'hidden' }}>
+                  <div style={{ width:`${Math.min(100,(confirmStats.outputGb/confirmStats.sourceGb)*100)}%`, height:'100%', background:T.accent, borderRadius:4 }}></div>
+                </div>
+                <div style={{ color:T.accentText, fontSize:12, fontFamily:"'DM Mono', monospace" }}>
+                  {Math.round((1-confirmStats.outputGb/confirmStats.sourceGb)*100)}% smaller at {profile?.name}
+                </div>
+              </div>
+              {/* Storage fit */}
+              {(()=>{
+                const rem=client.storageBudget-client.storageUsed;
+                const fits=confirmStats.outputGb<=rem;
+                return (
+                  <div style={{ background:fits?T.accentDim:T.errorDim, border:`1px solid ${fits?T.accent:T.error}`, borderRadius:6, padding:'10px 14px', display:'flex', alignItems:'center', gap:8, color:fits?T.accentText:T.error, fontSize:13 }}>
+                    {fits?<>✓ Fits on {client.name} — {rem.toFixed(0)} GB free</>:<><IcoWarn /> Not enough space — {rem.toFixed(0)} GB free, need ~{confirmStats.outputGb.toFixed(0)} GB</>}
+                  </div>
+                );
+              })()}
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <Btn onClick={onClose}>Cancel</Btn>
+              <Btn variant="primary" onClick={()=>onConfirm({content:selContent,seasons:selSeasons,profileId:selProfile,stats:confirmStats})}>
+                Create subscription — queue {confirmStats.episodes} episode{confirmStats.episodes!==1?'s':''}
+              </Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PickerRow({ content, onSelect }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onClick={onSelect} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 12px', borderRadius:6, background:hov?T.bg3:'transparent', cursor:'pointer', transition:'background 0.1s' }}>
+      <div style={{ width:30, height:30, borderRadius:5, background:T.bg4, display:'flex', alignItems:'center', justifyContent:'center', color:T.text3, flexShrink:0 }}>
+        {content.type==='movie'?<IcoFilm />:<IcoTV />}
+      </div>
+      <div style={{ flex:1 }}>
+        <span style={{ color:T.text0, fontWeight:500, fontSize:14 }}>{content.title}</span>
+        <span style={{ color:T.text3, fontFamily:"'DM Mono', monospace", fontSize:11, marginLeft:8 }}>{content.year}</span>
+      </div>
+      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+        <Badge label={content.genre} />
+        {content.type==='show'&&<span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{content.seasons.length}S</span>}
+        {content.type==='movie'&&<span style={{ color:T.text3, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{content.sourceGb} GB</span>}
+        <span style={{ color:T.text3, display:'flex' }}><IcoChevR /></span>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SIDEBAR
+// ═══════════════════════════════════════════════════════════════
+function Sidebar({ activeSection, activeClientId, onNav, clients, onSelectClient, width }) {
+  const navItems = [
+    {id:'clients',label:'Clients',Icon:IcoClients},
+    {id:'assets', label:'Assets', Icon:IcoAssets},
+    {id:'profiles',label:'Profiles',Icon:IcoProfiles},
+  ];
+  return (
+    <div style={{ width, flexShrink:0, background:'#1c1917', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
+      {/* Logo */}
+      <div style={{ padding:'15px 14px 12px', borderBottom:`1px solid ${T.border}`, flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ width:26, height:26, borderRadius:6, background:T.accentDim, display:'flex', alignItems:'center', justifyContent:'center', color:T.accent }}><IcoSat /></div>
+          <span style={{ color:T.text0, fontSize:14, fontWeight:600, fontFamily:"'DM Mono', monospace", letterSpacing:'-0.01em' }}>syncarr</span>
+          <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:T.accent, boxShadow:`0 0 6px ${T.accent}`, animation:'pulse-dot 2s ease-in-out infinite' }}></div>
+        </div>
+      </div>
+      {/* Nav */}
+      <div style={{ padding:'8px 8px 0', flexShrink:0 }}>
+        {navItems.map(({id,label,Icon})=>{
+          const active=activeSection===id&&!activeClientId;
+          return <SidebarNav key={id} label={label} icon={<Icon />} active={active} onClick={()=>onNav(id)} />;
+        })}
+      </div>
+      <div style={{ height:1, background:T.border, margin:'8px 12px' }}></div>
+      {/* Clients */}
+      <div style={{ flex:1, overflow:'auto', padding:'0 8px 8px' }}>
+        <SectionLabel label="Clients" />
+        {clients.map(c=><SidebarClient key={c.id} client={c} active={activeClientId===c.id} onClick={()=>onSelectClient(c)} />)}
+      </div>
+      {/* Footer */}
+      <div style={{ padding:'10px 14px', borderTop:`1px solid ${T.border}`, flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+          <div style={{ width:6, height:6, borderRadius:'50%', background:T.accent }}></div>
+          <span style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace" }}>server running</span>
+        </div>
+        <div style={{ color:T.text3, fontSize:11, fontFamily:"'DM Mono', monospace", marginTop:1 }}>v0.4.1 · local</div>
+      </div>
+    </div>
+  );
+}
+
+function SidebarNav({ label, icon, active, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ width:'100%', display:'flex', alignItems:'center', gap:9, padding:'7px 10px', borderRadius:5, border:'none', cursor:'pointer', background:active?T.bg4:hov?T.bg3:'transparent', color:active?T.text0:T.text2, fontSize:13, fontWeight:active?500:400, transition:'background 0.1s, color 0.1s', marginBottom:2, textAlign:'left' }}>
+      <span style={{ color:active?T.accent:hov?T.text1:T.text3 }}>{icon}</span>{label}
+    </button>
+  );
+}
+
+function SidebarClient({ client, active, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ width:'100%', display:'flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:5, border:'none', cursor:'pointer', background:active?T.bg4:hov?T.bg3:'transparent', transition:'background 0.1s', marginBottom:1, textAlign:'left' }}>
+      <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background:client.online?T.accent:T.text3, boxShadow:client.online&&client.counts.downloading>0?`0 0 5px ${T.accent}`:'none' }}></div>
+      <span style={{ color:active?T.text0:T.text1, fontSize:13, fontWeight:active?500:400, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{client.name}</span>
+      {client.counts.errors>0&&<div style={{ width:7, height:7, borderRadius:'50%', background:T.error, flexShrink:0 }}></div>}
+      {client.counts.downloading>0&&<span style={{ color:T.info, fontSize:10, fontFamily:"'DM Mono', monospace" }}>{client.counts.downloading}↓</span>}
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════
+function Toast({ message, onDone }) {
+  useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t);},[]);
+  return (
+    <div style={{ position:'fixed', bottom:24, right:24, zIndex:2000, background:T.bg3, border:`1px solid ${T.border2}`, borderRadius:8, padding:'12px 18px', display:'flex', alignItems:'center', gap:10, boxShadow:'0 8px 32px rgba(0,0,0,0.5)', animation:'fadeIn 0.2s ease' }}>
+      <div style={{ width:8, height:8, borderRadius:'50%', background:T.accent }}></div>
+      <span style={{ color:T.text0, fontSize:13 }}>{message}</span>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TWEAKS PANEL
+// ═══════════════════════════════════════════════════════════════
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentColor": "green",
+  "sidebarWidth": 220,
+  "showSizes": true
+}/*EDITMODE-END*/;
+
+function TweaksPanel({ tweaks, setTweak, onClose }) {
+  const [pos, setPos] = useState({x: window.innerWidth - 280, y: 80});
+  const drag = React.useRef(null);
+  const onMD = e => { drag.current = {ox:e.clientX-pos.x, oy:e.clientY-pos.y}; };
+  useEffect(()=>{
+    const mm=e=>{if(drag.current) setPos({x:e.clientX-drag.current.ox, y:e.clientY-drag.current.oy});};
+    const mu=()=>{drag.current=null;};
+    window.addEventListener('mousemove',mm); window.addEventListener('mouseup',mu);
+    return()=>{window.removeEventListener('mousemove',mm); window.removeEventListener('mouseup',mu);};
+  },[]);
+  const accentOpts=[{v:'green',l:'Green'},{v:'blue',l:'Blue'},{v:'amber',l:'Amber'},{v:'violet',l:'Violet'}];
+  return (
+    <div style={{ position:'fixed', left:pos.x, top:pos.y, width:240, background:T.bg2, border:`1px solid ${T.border2}`, borderRadius:10, boxShadow:'0 16px 48px rgba(0,0,0,0.6)', zIndex:3000, userSelect:'none' }}>
+      <div onMouseDown={onMD} style={{ padding:'12px 14px', borderBottom:`1px solid ${T.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'move' }}>
+        <span style={{ color:T.text0, fontSize:13, fontWeight:600 }}>Tweaks</span>
+        <IconBtn onClick={onClose} title="Close"><IcoClose /></IconBtn>
+      </div>
+      <div style={{ padding:14, display:'flex', flexDirection:'column', gap:14 }}>
+        <div>
+          <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:8 }}>ACCENT COLOR</div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {accentOpts.map(o=>(
+              <button key={o.v} onClick={()=>setTweak('accentColor',o.v)}
+                style={{ padding:'5px 10px', borderRadius:4, border:`1px solid ${tweaks.accentColor===o.v?T.accent:T.border2}`, background:tweaks.accentColor===o.v?T.accentDim:T.bg4, color:tweaks.accentColor===o.v?T.accentText:T.text2, fontSize:12, cursor:'pointer', transition:'all 0.1s' }}>{o.l}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ color:T.text3, fontSize:10, fontFamily:"'DM Mono', monospace", letterSpacing:'0.1em', marginBottom:8 }}>SIDEBAR WIDTH — {tweaks.sidebarWidth}px</div>
+          <input type="range" min={180} max={280} step={10} value={tweaks.sidebarWidth} onChange={e=>setTweak('sidebarWidth',Number(e.target.value))}
+            style={{ width:'100%', accentColor:T.accent }} />
+        </div>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ color:T.text2, fontSize:13 }}>Show file sizes</span>
+          <button onClick={()=>setTweak('showSizes',!tweaks.showSizes)}
+            style={{ width:36, height:20, borderRadius:10, border:'none', cursor:'pointer', background:tweaks.showSizes?T.accent:T.bg4, transition:'background 0.2s', position:'relative' }}>
+            <div style={{ position:'absolute', top:2, left:tweaks.showSizes?18:2, width:16, height:16, borderRadius:'50%', background:'white', transition:'left 0.2s' }}></div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════════════
+const ACCENT_MAP = {
+  green:  {accent:'oklch(70% 0.15 160)', accentDim:'oklch(70% 0.15 160 / 0.15)', accentText:'oklch(75% 0.14 160)'},
+  blue:   {accent:'oklch(68% 0.14 240)', accentDim:'oklch(68% 0.14 240 / 0.15)', accentText:'oklch(73% 0.12 240)'},
+  amber:  {accent:'oklch(72% 0.14 80)',  accentDim:'oklch(72% 0.14 80 / 0.15)',  accentText:'oklch(76% 0.13 80)'},
+  violet: {accent:'oklch(68% 0.14 300)', accentDim:'oklch(68% 0.14 300 / 0.15)', accentText:'oklch(73% 0.12 300)'},
+};
+
+function App() {
+  const [tweaks, setTweaksState] = useState(TWEAK_DEFAULTS);
+  const [showTweaks, setShowTweaks] = useState(false);
+
+  const [section, setSection] = useState('clients');
+  const [activeClientId, setActiveClientId] = useState(null);
+  const [clientView, setClientView] = useState('assignments');
+
+  const [clients, setClients] = useState(INIT_CLIENTS);
+  const [profiles, setProfiles] = useState(INIT_PROFILES);
+  const [subs, setSubs] = useState(INIT_SUBSCRIPTIONS);
+  const [assignments] = useState(INIT_ASSIGNMENTS);
+  const [assets] = useState(INIT_ASSETS);
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerClientId, setPickerClientId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  // Apply accent color — mutate T then force a state update via a dedicated counter
+  const [, forceUpdate] = useState(0);
+  useEffect(()=>{
+    const colors = ACCENT_MAP[tweaks.accentColor]||ACCENT_MAP.green;
+    Object.assign(T, colors);
+    forceUpdate(n => n+1);
+  },[tweaks.accentColor]);
+
+  // Tweaks protocol
+  useEffect(()=>{
+    const h=e=>{
+      if(e.data?.type==='__activate_edit_mode') setShowTweaks(true);
+      if(e.data?.type==='__deactivate_edit_mode') setShowTweaks(false);
+    };
+    window.addEventListener('message',h);
+    window.parent.postMessage({type:'__edit_mode_available'},'*');
+    return()=>window.removeEventListener('message',h);
+  },[]);
+
+  const setTweak = useCallback((k,v)=>{
+    const next = typeof k==='object'?{...tweaks,...k}:{...tweaks,[k]:v};
+    setTweaksState(next);
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits:next},'*');
+  },[tweaks]);
+
+  const showToast = msg=>setToast(msg);
+
+  function navTo(id){ setSection(id); setActiveClientId(null); }
+  function selectClient(c){ setActiveClientId(c.id); setSection('clients'); setClientView('assignments'); }
+  function openPicker(c){ setPickerClientId(c.id); setPickerOpen(true); }
+
+  function confirmSubscription({content,seasons,profileId,stats}){
+    const newSub={id:`sub_${Date.now()}`,contentId:content.id,title:content.title,scope:stats.scope,episodes:stats.episodes,profileId,sizeGb:parseFloat(stats.outputGb.toFixed(1))};
+    setSubs(prev=>({...prev,[pickerClientId]:[...(prev[pickerClientId]||[]),newSub]}));
+    setClients(prev=>prev.map(c=>c.id===pickerClientId?{...c,counts:{...c.counts,queued:c.counts.queued+stats.episodes}}:c));
+    showToast(`Subscription created — ${stats.episodes} episodes queued`);
+  }
+
+  function removeSub(clientId, subId){
+    setSubs(prev=>({...prev,[clientId]:(prev[clientId]||[]).filter(s=>s.id!==subId)}));
+    showToast('Subscription removed — eviction queued');
+  }
+
+  function handleProfileChange(action,p){
+    if(action==='save'){
+      if(p.id) setProfiles(prev=>prev.map(x=>x.id===p.id?{...x,...p}:x));
+      else setProfiles(prev=>[...prev,{...p,id:`p_${Date.now()}`,subscriptions:0}]);
+      showToast(p.id?'Profile updated':'Profile created');
+    } else {
+      setProfiles(prev=>prev.filter(x=>x.id!==p.id));
+      showToast('Profile deleted');
+    }
+  }
+
+  const activeClient = activeClientId ? clients.find(c=>c.id===activeClientId) : null;
+  const pickerClient = pickerClientId ? clients.find(c=>c.id===pickerClientId) : null;
+
+  return (
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:T.bg0 }}>
+      <Sidebar
+        activeSection={section}
+        activeClientId={activeClientId}
+        onNav={navTo}
+        clients={clients}
+        onSelectClient={selectClient}
+        width={tweaks.sidebarWidth}
+      />
+      <div style={{ flex:1, overflow:'auto', display:'flex', flexDirection:'column' }}>
+        {section==='clients'&&!activeClient&&(
+          <ClientDashboard clients={clients} onSelectClient={selectClient} onAddSubscription={openPicker} />
+        )}
+        {section==='clients'&&activeClient&&clientView==='assignments'&&(
+          <AssignmentList
+            client={activeClient}
+            assignments={assignments}
+            onBack={()=>setActiveClientId(null)}
+            onManageSubs={()=>setClientView('subscriptions')}
+            onAddSub={()=>openPicker(activeClient)}
+          />
+        )}
+        {section==='clients'&&activeClient&&clientView==='subscriptions'&&(
+          <SubscriptionManager
+            client={activeClient}
+            subscriptions={subs[activeClient.id]||[]}
+            profiles={profiles}
+            onBack={()=>setClientView('assignments')}
+            onAddSub={()=>openPicker(activeClient)}
+            onRemove={subId=>removeSub(activeClient.id,subId)}
+          />
+        )}
+        {section==='assets'&&<AssetInspector assets={assets} profiles={profiles} clients={clients} />}
+        {section==='profiles'&&<ProfileManager profiles={profiles} onProfileChange={handleProfileChange} />}
+      </div>
+
+      {/* Content picker modal */}
+      {pickerOpen&&pickerClient&&(
+        <div onClick={()=>setPickerOpen(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(2px)' }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:T.bg2, border:`1px solid ${T.border2}`, borderRadius:10, width:640, height:680, display:'flex', flexDirection:'column', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', overflow:'hidden' }}>
+            <div style={{ padding:'14px 20px', borderBottom:`1px solid ${T.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+              <div>
+                <span style={{ color:T.text0, fontWeight:600, fontSize:14 }}>Add subscription</span>
+                <span style={{ color:T.text3, fontSize:13, marginLeft:8 }}>→ {pickerClient.name}</span>
+              </div>
+              <IconBtn onClick={()=>setPickerOpen(false)} title="Close"><IcoClose /></IconBtn>
+            </div>
+            <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+              <ContentPicker
+                shows={SHOWS} movies={MOVIES} profiles={profiles}
+                client={pickerClient}
+                onConfirm={data=>{confirmSubscription(data);setPickerOpen(false);}}
+                onClose={()=>setPickerOpen(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast&&<Toast message={toast} onDone={()=>setToast(null)} />}
+      {showTweaks&&<TweaksPanel tweaks={tweaks} setTweak={setTweak} onClose={()=>{setShowTweaks(false);window.parent.postMessage({type:'__edit_mode_dismissed'},'*');}} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+if (window.__splashDone) window.__splashDone();
+</script>
+</body>
+</html>
