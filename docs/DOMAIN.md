@@ -134,25 +134,37 @@ Pseudocode:
 
 ```python
 def resolve_all_subscriptions():
-    desired_assignments = set()  # (client_id, asset_id) pairs
+    desired_assignments = set()
 
     for sub in db.subscriptions:
-        items = provider.expand_scope(sub.media_item_id, sub.scope)  # list of episode/movie items
+        items = provider.expand_scope(sub.media_item_id, sub.scope)
         for item in items:
             asset = get_or_create_asset(item.provider_id, sub.profile_id, item.file_path)
             desired_assignments.add((sub.client_id, asset.id))
 
-    current_assignments = set(db.query("SELECT client_id, asset_id FROM assignments WHERE state != 'evict'"))
+    # Split current assignments by state
+    active_assignments = set(db.query(
+        "SELECT client_id, asset_id FROM assignments WHERE state IN ('pending', 'delivered')"
+    ))
+    evicting_assignments = set(db.query(
+        "SELECT client_id, asset_id FROM assignments WHERE state = 'evict'"
+    ))
+    current_assignments = active_assignments | evicting_assignments
 
-    # New assignments
-    for (client_id, asset_id) in desired_assignments - current_assignments:
-        db.insert_assignment(client_id, asset_id, state='pending')
+    # New assignments: INSERT if not present at all; flip evict → pending if re-subscribing
+    for (client_id, asset_id) in desired_assignments:
+        if (client_id, asset_id) in evicting_assignments:
+            # Cancel the in-progress eviction
+            db.update_assignment(client_id, asset_id, state='pending', evict_requested_at=None)
+        elif (client_id, asset_id) not in active_assignments:
+            db.insert_assignment(client_id, asset_id, state='pending')
 
     # Removed assignments → flip to evict
     for (client_id, asset_id) in current_assignments - desired_assignments:
-        db.update_assignment(client_id, asset_id, state='evict')
+        if (client_id, asset_id) in active_assignments:  # don't double-evict
+            db.update_assignment(client_id, asset_id, state='evict')
 
-    # Garbage-collect orphaned assets (no assignments at all)
+    # GC orphaned assets (no assignments at all)
     db.execute("""
         DELETE FROM assets
         WHERE id NOT IN (SELECT asset_id FROM assignments)
