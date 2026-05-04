@@ -84,7 +84,21 @@ The size/sha256 fields are sent on `delivered` only, for verification. On mismat
 
 Stream the transcoded asset. Must support HTTP `Range` requests.
 
-**Auth**: agent token
+**Auth**: agent token. aria2 must be configured to send the bearer token with the download request via the `header` option:
+
+```python
+aria2.add_uris(
+    [download_url],
+    options={
+        "header": f"Authorization: Bearer {config.token}",
+        "out": filename,
+        "dir": str(config.library_root / relative_path_parent),
+        "checksum": f"sha-256={sha256}",
+    }
+)
+```
+
+The download URL is absolute: `{server_base_url}/download/{asset_id}`. The server base URL is stored in agent config (written by the installer or manually).
 
 **Response 200 / 206**:
 - `Content-Type: application/octet-stream`
