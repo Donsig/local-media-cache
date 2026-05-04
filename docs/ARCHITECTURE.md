@@ -153,6 +153,19 @@ What's required to handle this:
 - `last_seen` on client tracks liveness for diagnostics; never used to auto-cleanup
 - All state changes confirmed via separate request after success; resumable if confirm fails
 
+### Recovery table
+
+| Scenario | State at failure | Recovery |
+|----------|-----------------|----------|
+| Server crashes mid-transcode | Asset in `transcoding` state, partial file may exist at `cache_path` | On server startup: scan for `transcoding` assets, delete any partial `cache_path` file, reset to `queued`. Worker picks them up on next tick. |
+| Server crashes after transcode, before DB update | Asset still `transcoding`, complete file at `cache_path` | Same as above — reset to `queued`, transcode again. Idempotent; old file is overwritten. (Optimization: check if file is complete before re-transcoding — deferred.) |
+| Agent crashes mid-download | Partial file in library root; aria2 has partial state | aria2 session file persists. On agent restart, aria2 resumes the download. Agent reconciles by polling aria2 status. |
+| Agent crashes after download, before confirm | File present on disk, assignment still `pending` on server | On next agent startup, agent compares local files against server's `ready` assignments. File already exists + checksum matches → send confirm immediately. |
+| Confirm request lost in transit | File delivered, assignment still `pending` on server | Agent retries confirm on next poll (it sees `ready` assignment, file exists, checksum matches → re-sends confirm). Confirm is idempotent. |
+| Server evicts assignment while agent is downloading | Assignment flips to `evict`; agent is mid-download | Agent sees `evict` on next poll. It cancels the aria2 download, deletes any partial file, confirms eviction. No data loss; no stuck state. |
+| Satellite offline for days/weeks | No change to server state | Server holds assignments indefinitely. Agent resumes normally on reconnect. aria2 resumes partial downloads via Range requests. |
+| Storage full on satellite | aria2 download fails | Agent sees aria2 error, marks gid as failed locally, skips on next poll, logs warning. Does not confirm delivered. Server assignment stays `pending`. Operator must free disk; agent retries on next restart. |
+
 ## What this is NOT
 
 - Not a streaming proxy. Files are pre-transferred, then played locally.
