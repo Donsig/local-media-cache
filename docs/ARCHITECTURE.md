@@ -40,6 +40,26 @@ Communication is **always satellite → home**, never the reverse. This matters 
 
 ## Components
 
+### Container volume layout
+
+The server container expects three mount points:
+
+| Mount | Mode | Purpose |
+|-------|------|---------|
+| `/mnt/media` | read-only | Source media library (NFS from NAS). This is the path `PlexProvider` rewrites Plex-reported paths to via `path_rewrite` config. |
+| `/mnt/cache` | read-write | Transcoded asset cache. ffmpeg writes here; FastAPI serves from here. Should be on fast local storage, not NFS. |
+| `/data` | read-write | SQLite database and app state. Persistent Docker volume. |
+
+**docker-compose.yml** (abbreviated):
+```yaml
+volumes:
+  - /path/to/nfs/media:/mnt/media:ro
+  - /path/to/local/cache:/mnt/cache
+  - local_media_cache_data:/data
+```
+
+**Path rewrite config**: `plex_path_prefix` is whatever path Plex reports for files (its internal LXC/container path, e.g. `/data/media`). `local_path_prefix` is `/mnt/media` — the container-internal mount point. These two values are the only environment-specific config needed for `PlexProvider` to read source files.
+
 ### Server (home)
 
 A single Docker container running:
