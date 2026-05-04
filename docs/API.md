@@ -74,7 +74,11 @@ Confirm a state transition for an assignment.
 }
 ```
 
-The size/sha256 fields are sent on `delivered` only, for verification. On mismatch, server logs and may flag for re-transfer (defer to v2).
+The size/sha256 fields are sent on `delivered` only, for verification.
+
+**On sha256 or size mismatch:** Server logs the discrepancy with both expected and actual values. Returns `{"ok": false, "reason": "checksum_mismatch", "expected_sha256": "...", "actual_sha256": "..."}`. The assignment remains in `pending` state. On the agent's next poll, the assignment will appear as `ready` again, and the agent will re-queue the download. aria2 will delete the corrupt file (checksum validation fails) and restart the download.
+
+**On match:** Server sets `assignment.state = delivered` and `assignment.delivered_at = now()`. Returns `{"ok": true}`.
 
 **Response 200**: `{"ok": true}`
 
