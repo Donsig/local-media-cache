@@ -43,20 +43,32 @@ subscriptions
   id                  INTEGER PRIMARY KEY
   client_id           TEXT NOT NULL REFERENCES clients(id)
   media_item_id       TEXT NOT NULL         -- provider-specific item ID (e.g. Plex ratingKey)
-  scope               TEXT NOT NULL         -- see scope formats below
+  scope_type          TEXT NOT NULL         -- 'movie' | 'show:all' | 'show:seasons' | 'show:latest' | 'show:season_from'
+  scope_params        TEXT                  -- JSON; shape depends on scope_type (NULL for 'movie' and 'show:all')
   profile_id          TEXT NOT NULL REFERENCES profiles(id)
   created_at          TIMESTAMP NOT NULL
 ```
 
-**Scope formats** (string-encoded for flexibility):
+**Scope types and params:**
 
-- `movie` — single movie (media_item_id is the movie)
-- `show:all` — all episodes of a show
-- `show:seasons:[2,3]` — specific seasons
-- `show:latest:N` — latest N episodes (re-evaluated on each resolve)
-- `show:season:S:from:E` — from S0xE0y onwards (e.g. follow ongoing season)
+| scope_type | scope_params shape | MVP support |
+|---|---|---|
+| `movie` | `null` | ✅ |
+| `show:all` | `null` | ✅ |
+| `show:seasons` | `{"seasons": [2, 3]}` | ✅ |
+| `show:latest` | `{"n": 5}` | ❌ deferred |
+| `show:season_from` | `{"season": 4, "from_episode": 3}` | ❌ deferred |
 
-The MVP supports `movie` and `show:seasons:[N,M,...]` only. Other scopes are deferred.
+**API representation** (POST /subscriptions body):
+```json
+{
+  "client_id": "caravan",
+  "media_item_id": "12345",
+  "scope_type": "show:seasons",
+  "scope_params": {"seasons": [2, 3]},
+  "profile_id": "5gb_1080p_h265"
+}
+```
 
 ### Asset
 
