@@ -10,6 +10,7 @@ Before changing any code or design:
 2. `docs/ARCHITECTURE.md` — system design and component responsibilities
 3. `docs/DOMAIN.md` — entities and state machines
 4. `docs/DECISIONS.md` — why things are the way they are
+5. `design/Syncarr.html` — Claude Design UI mockup; `design/README.md` — design rationale and component notes
 
 If a request conflicts with a documented decision (in `docs/DECISIONS.md`), surface the conflict explicitly. Don't silently work around it.
 
