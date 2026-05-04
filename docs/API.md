@@ -146,7 +146,7 @@ Used by the web UI. Standard CRUD, mostly self-explanatory.
 - `GET /clients` — list all clients
 - `POST /clients` — create client (returns auth token, shown once)
 - `PATCH /clients/{id}` — update name, storage_budget_bytes
-- `DELETE /clients/{id}` — remove client and cascade subscriptions
+- `DELETE /clients/{id}` — begin decommissioning: sets `decommissioning = true`, deletes all subscriptions (triggers resolver), flips all assignments to `evict`. Returns 202 Accepted. The client row is deleted once all assignments are confirmed evicted. Subsequent `GET /assignments` for this client returns only `evict` items; new subscription creation returns 409.
 - `POST /clients/{id}/rotate-token` — issue new token, invalidate old
 
 ### Profiles

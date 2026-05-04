@@ -14,6 +14,9 @@ clients
   storage_budget_bytes INTEGER              -- soft limit, used for UI warnings
   last_seen           TIMESTAMP             -- updated on each /assignments poll
   created_at          TIMESTAMP NOT NULL
+  decommissioning     BOOLEAN NOT NULL DEFAULT FALSE
+  -- Set by DELETE /clients/{id}. Prevents new subscriptions; cascades all subs to deleted
+  -- and all assignments to evict. Row is GC'd once all assignments are confirmed evicted.
 ```
 
 ### Profile
@@ -195,3 +198,5 @@ The agent API derives an effective `state` field for each assignment. Assignment
 **Same content in multiple libraries**: out of scope for MVP. Subscriptions reference provider-specific item IDs (e.g. Plex ratingKeys, Jellyfin itemIds), which are assumed globally unique within a provider instance.
 
 **Client disappears permanently**: keep the row. UI should expose a "remove client" action that cascades to remove all subscriptions and assignments. Don't auto-detect.
+
+**Client decommissioning**: `DELETE /clients/{id}` does not immediately delete the row. It sets `client.decommissioning = true`, deletes all subscriptions, and flips all active assignments to `evict`. The client row is GC'd by the resolver's cleanup pass once all assignments have been confirmed evicted (assignment count = 0). While decommissioning, `GET /assignments` for that client returns only `evict` assignments. New subscriptions are rejected (409).
