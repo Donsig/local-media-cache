@@ -1,0 +1,17 @@
+services:
+  server:
+    build: .
+    environment:
+      SYNCARR_DATABASE_URL: sqlite:////data/syncarr.db
+      SYNCARR_MEDIA_ROOT: /mnt/media
+      SYNCARR_CACHE_ROOT: /mnt/cache
+    ports:
+      - "8000:8000"
+    volumes:
+      - /path/to/nfs/media:/mnt/media:ro
+      - /path/to/local/cache:/mnt/cache
+      - local_media_cache_data:/data
+
+volumes:
+  local_media_cache_data:
+

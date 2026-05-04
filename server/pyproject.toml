@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "syncarr-server"
+version = "0.1.0"
+description = "Local media cache server"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "aiosqlite>=0.20",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "pydantic-settings>=2.6",
+    "plexapi>=4.15",
+    "sqlalchemy>=2.0.36",
+    "structlog>=24.4",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "anyio>=4.4",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/syncarr_server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
