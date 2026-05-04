@@ -160,7 +160,7 @@ The preview endpoint is what powers the "this will queue 18 episodes ~90GB → ~
 
 - `GET /status` — overall: client count, asset count by state, transcode queue depth, cache size on disk
 - `GET /assets?status=X` — list assets, optionally filtered, for debug UI
-- `GET /assignments?client_id=X` — UI view of assignments (different from agent's `/assignments`)
+- `GET /clients/{id}/assignments` — full assignment list for a client, for UI/debug use. Returns all states including delivered, with asset details. Different semantics from agent's `GET /assignments` (which is scoped to the caller's client and omits delivered).
 - `POST /assets/{id}/retry` — manually retry a failed transcode
 
 ### Installer
