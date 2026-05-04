@@ -162,6 +162,18 @@ def resolve_all_subscriptions():
 
 Note: assets in `evict` state still count as assignments for the purpose of GC. They're only fully removed after agent confirms eviction.
 
+## Effective state projection (assignments → agent API)
+
+The agent API derives an effective `state` field for each assignment. Assignments in `delivered` state are omitted from the response entirely — the agent has already done its job.
+
+| assignment.state | asset.status          | effective state returned to agent |
+|------------------|-----------------------|-----------------------------------|
+| evict            | any                   | evict                             |
+| pending          | queued / transcoding  | queued                            |
+| pending          | failed                | queued (agent waits; server retries or user intervenes) |
+| pending          | ready                 | ready                             |
+| delivered        | any                   | (omitted)                         |
+
 ## Edge cases worth knowing
 
 **Profile changed on existing subscription**: this is a delete-and-recreate from the assignment perspective. Old (client_id, old_asset_id) flips to evict. New (client_id, new_asset_id) created as pending. Old asset evicted from cache once no client references it.

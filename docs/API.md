@@ -25,6 +25,7 @@ The primary agent endpoint. Returns everything the agent needs to do.
     {
       "asset_id": 1234,
       "state": "ready",
+      "_state_note": "Derived: evict > ready > queued. 'delivered' assignments omitted.",
       "source_media_id": "12345",
       "filename": "Bluey - S02E01 - Dance Mode.mkv",
       "size_bytes": 5120000000,
@@ -52,6 +53,9 @@ The primary agent endpoint. Returns everything the agent needs to do.
   }
 }
 ```
+
+**State projection**: `state` in the response is derived from `assignment.state` + `asset.status`.
+Delivered assignments are omitted. See DOMAIN.md "Effective state projection" for the full table.
 
 The agent treats this as a full snapshot; no incremental updates. Bumps `clients.last_seen` on the server.
 
