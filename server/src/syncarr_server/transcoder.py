@@ -6,8 +6,10 @@ import subprocess
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from syncarr_server.config import Settings
@@ -104,10 +106,13 @@ class TranscodeWorker:
             if asset_id is None:
                 return
 
-            claim_result = await session.execute(
-                update(Asset)
-                .where(Asset.id == asset_id, Asset.status == "queued")
-                .values(status="transcoding"),
+            claim_result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(Asset)
+                    .where(Asset.id == asset_id, Asset.status == "queued")
+                    .values(status="transcoding"),
+                ),
             )
             if claim_result.rowcount != 1:
                 await session.rollback()

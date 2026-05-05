@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { getClients, getLibraries, getLibraryItems, getMediaItem } from '../api'
+import { useAssets } from '../api/media'
 import { Badge } from '../components/Badge'
 import { Btn } from '../components/Btn'
 import { IcoChevR, IcoFilm, IcoSearch, IcoTV } from '../components/icons'
@@ -243,11 +244,51 @@ function useLibraryTree() {
   }
 }
 
+function statusToBadgeColor(status: string): BadgeColor {
+  if (status === 'ready') return 'ready'
+  if (status === 'transcoding') return 'transcoding'
+  if (status === 'queued') return 'queued'
+  if (status === 'failed') return 'failed'
+  return 'default'
+}
+
 export function LibraryScreen() {
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({})
   const [activeFilter, setActiveFilter] = useState('all')
   const [search, setSearch] = useState('')
   const { clients, libraries, isLoading, error } = useLibraryTree()
+
+  // Collect episode IDs from all expanded items/seasons so we can fetch their asset status.
+  const expandedEpisodeIds = useMemo(() => {
+    const ids: string[] = []
+    for (const library of libraries) {
+      for (const item of library.items) {
+        const itemOpen = openMap[item.id] ?? false
+        if (!itemOpen) continue
+        for (const episode of item.episodes) {
+          ids.push(episode.id)
+        }
+        for (const season of item.seasons) {
+          const seasonOpen = openMap[season.id] ?? false
+          if (!seasonOpen) continue
+          for (const episode of season.episodes) {
+            ids.push(episode.id)
+          }
+        }
+      }
+    }
+    return ids
+  }, [libraries, openMap])
+
+  const assetsQuery = useAssets(expandedEpisodeIds)
+
+  const assetMap = useMemo(() => {
+    const map = new Map<string, { status: string }>()
+    for (const asset of assetsQuery.data ?? []) {
+      map.set(asset.media_item_id, asset)
+    }
+    return map
+  }, [assetsQuery.data])
 
   const normalizedSearch = search.trim().toLowerCase()
   const filteredLibraries = useMemo(
@@ -385,16 +426,20 @@ export function LibraryScreen() {
                                     />
 
                                     {seasonOpen
-                                      ? season.episodes.map((episode) => (
-                                          <TreeRow
-                                            key={episode.id}
-                                            depth={3}
-                                            title={`${episode.code} · ${episode.title}`}
-                                            titleClassName="tree-row__title--episode mono"
-                                            clients={clients.map((client) => client.name)}
-                                            badgeLabel="Unknown"
-                                          />
-                                        ))
+                                      ? season.episodes.map((episode) => {
+                                          const asset = assetMap.get(episode.id)
+                                          return (
+                                            <TreeRow
+                                              key={episode.id}
+                                              depth={3}
+                                              title={`${episode.code} · ${episode.title}`}
+                                              titleClassName="tree-row__title--episode mono"
+                                              clients={clients.map((client) => client.name)}
+                                              badgeLabel={asset ? asset.status : '–'}
+                                              badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
+                                            />
+                                          )
+                                        })
                                       : null}
                                   </div>
                                 )
@@ -402,16 +447,20 @@ export function LibraryScreen() {
                             : null}
 
                           {itemOpen && item.episodes.length > 0
-                            ? item.episodes.map((episode) => (
-                                <TreeRow
-                                  key={episode.id}
-                                  depth={2}
-                                  title={`${episode.code} · ${episode.title}`}
-                                  titleClassName="tree-row__title--episode mono"
-                                  clients={clients.map((client) => client.name)}
-                                  badgeLabel="Unknown"
-                                />
-                              ))
+                            ? item.episodes.map((episode) => {
+                                const asset = assetMap.get(episode.id)
+                                return (
+                                  <TreeRow
+                                    key={episode.id}
+                                    depth={2}
+                                    title={`${episode.code} · ${episode.title}`}
+                                    titleClassName="tree-row__title--episode mono"
+                                    clients={clients.map((client) => client.name)}
+                                    badgeLabel={asset ? asset.status : '–'}
+                                    badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
+                                  />
+                                )
+                              })
                             : null}
                         </div>
                       )
@@ -426,12 +475,15 @@ export function LibraryScreen() {
   )
 }
 
+type BadgeColor = 'ready' | 'transcoding' | 'queued' | 'failed' | 'default'
+
 type TreeRowProps = {
   depth: number
   title: string
   titleClassName?: string
   meta?: string
   badgeLabel?: string
+  badgeColor?: BadgeColor
   clients: string[]
   expandable?: boolean
   open?: boolean
@@ -445,6 +497,7 @@ function TreeRow({
   titleClassName = '',
   meta,
   badgeLabel,
+  badgeColor = 'default',
   clients,
   expandable = false,
   open = false,
@@ -479,7 +532,7 @@ function TreeRow({
 
       <div className="tree-row__right">
         {meta ? <span className="tree-meta">{meta}</span> : null}
-        {badgeLabel ? <Badge color="default" label={badgeLabel} /> : null}
+        {badgeLabel ? <Badge color={badgeColor} label={badgeLabel} /> : null}
         {clients.map((client) => (
           <button
             key={client}

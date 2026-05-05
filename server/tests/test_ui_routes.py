@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from syncarr_server.models import Asset, Assignment, Client
+from syncarr_server.models import Asset, Assignment, Client, Profile
 
 pytestmark = pytest.mark.asyncio
 
@@ -190,3 +192,46 @@ async def test_decommission_client(
     assert client.decommissioning is True
     assert len(assignments) == 2
     assert all(assignment.state == "evict" for assignment in assignments)
+
+
+async def test_get_assets(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    profile = Profile(
+        id="p-test",
+        name="Test Profile",
+        ffmpeg_args=None,
+        target_size_bytes=None,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(profile)
+    await db_session.flush()
+
+    asset = Asset(
+        source_media_id="ep-42",
+        profile_id="p-test",
+        source_path="/mnt/media/ep42.mkv",
+        cache_path=None,
+        size_bytes=None,
+        sha256=None,
+        status="queued",
+        status_detail=None,
+        created_at=datetime.now(UTC),
+        ready_at=None,
+    )
+    db_session.add(asset)
+    await db_session.commit()
+
+    response = await http_client.get(
+        "/assets?media_item_ids=ep-42",
+        headers=auth_headers_ui,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["media_item_id"] == "ep-42"
+    assert data[0]["status"] == "queued"
+    assert data[0]["profile_id"] == "p-test"

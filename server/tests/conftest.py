@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from collections.abc import AsyncIterator
@@ -188,6 +189,16 @@ class MockFfmpeg:
         self.output_bytes = output_bytes
 
 
+@dataclass(frozen=True)
+class AgentTestFiles:
+    cache_path: Path
+    source_path: Path
+    cache_size_bytes: int
+    source_size_bytes: int
+    cache_sha256: str
+    source_sha256: str
+
+
 @pytest.fixture
 def auth_headers_ui() -> dict[str, str]:
     return {"Authorization": "Bearer ui-token"}
@@ -251,9 +262,48 @@ async def agent_client(db_session: AsyncSession) -> Client:
     return client
 
 
+@pytest_asyncio.fixture
+async def agent_client_b(db_session: AsyncSession) -> Client:
+    client = Client(
+        id="test-agent-b",
+        name="Test Agent B",
+        auth_token="agent-test-agent-b-testtoken123",
+        storage_budget_bytes=None,
+        last_seen=None,
+        created_at=datetime.now(UTC),
+        decommissioning=False,
+    )
+    db_session.add(client)
+    await db_session.commit()
+    return client
+
+
 @pytest.fixture
 def auth_headers_agent() -> dict[str, str]:
     return {"Authorization": "Bearer agent-test-agent-testtoken123"}
+
+
+@pytest.fixture
+def auth_headers_agent_b() -> dict[str, str]:
+    return {"Authorization": "Bearer agent-test-agent-b-testtoken123"}
+
+
+@pytest.fixture
+def agent_test_files(tmp_path: Path) -> AgentTestFiles:
+    cache_bytes = bytes(range(256)) * 8
+    source_bytes = b"passthrough-source-video"
+    cache_path = tmp_path / "cache.mkv"
+    source_path = tmp_path / "source.mkv"
+    cache_path.write_bytes(cache_bytes)
+    source_path.write_bytes(source_bytes)
+    return AgentTestFiles(
+        cache_path=cache_path,
+        source_path=source_path,
+        cache_size_bytes=len(cache_bytes),
+        source_size_bytes=len(source_bytes),
+        cache_sha256=hashlib.sha256(cache_bytes).hexdigest(),
+        source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+    )
 
 
 @pytest_asyncio.fixture

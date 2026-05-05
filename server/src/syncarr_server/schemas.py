@@ -158,3 +158,53 @@ class SubscriptionSchema(Schema):
 
 class SubscriptionsResponse(Schema):
     subscriptions: list[SubscriptionSchema]
+
+
+class AssetStatusSchema(Schema):
+    media_item_id: str
+    profile_id: str
+    status: str
+    size_bytes: int | None = None
+    ready_at: datetime | None = None
+
+
+AgentAssignmentState = Literal["queued", "ready", "evict"]
+AgentConfirmState = Literal["delivered", "evicted"]
+AgentConfirmMismatchReason = Literal["checksum_mismatch"]
+
+
+class AgentAssignmentSchema(Schema):
+    asset_id: int
+    state: AgentAssignmentState
+    source_media_id: str
+    filename: str
+    size_bytes: int | None = None
+    sha256: str | None = None
+    download_url: str | None = None
+
+
+class AgentAssignmentsStats(Schema):
+    total_assigned_bytes: int
+    ready_count: int
+    queued_count: int
+    evict_count: int
+
+
+class AgentAssignmentsResponse(Schema):
+    client_id: str
+    server_time: datetime
+    assignments: list[AgentAssignmentSchema]
+    stats: AgentAssignmentsStats
+
+
+class AgentConfirmRequest(Schema):
+    state: AgentConfirmState
+    actual_sha256: str | None = None
+    actual_size_bytes: int | None = None
+
+
+class AgentConfirmResponse(Schema):
+    ok: bool
+    reason: AgentConfirmMismatchReason | None = None
+    expected_sha256: str | None = None
+    actual_sha256: str | None = None

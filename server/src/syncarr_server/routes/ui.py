@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.auth import require_ui_auth
 from syncarr_server.db import get_session
-from syncarr_server.models import Client, Profile, Subscription
+from syncarr_server.models import Asset, Client, Profile, Subscription
 from syncarr_server.providers.base import MediaProvider
 from syncarr_server.resolver import resolve_all_subscriptions
 from syncarr_server.schemas import (
+    AssetStatusSchema,
     ClientCreateRequest,
     ClientCreateResponse,
     ClientSchema,
@@ -391,3 +392,30 @@ async def delete_subscription(
     await session.commit()
     await resolve_all_subscriptions(provider=_provider(request), session=session)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/assets",
+    response_model=list[AssetStatusSchema],
+    dependencies=[Depends(require_ui_auth)],
+)
+async def list_assets(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    media_item_ids: str = "",
+) -> list[AssetStatusSchema]:
+    ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
+    if not ids:
+        return []
+    assets = list(
+        (await session.execute(select(Asset).where(Asset.source_media_id.in_(ids)))).scalars()
+    )
+    return [
+        AssetStatusSchema(
+            media_item_id=asset.source_media_id,
+            profile_id=asset.profile_id,
+            status=asset.status,
+            size_bytes=asset.size_bytes,
+            ready_at=asset.ready_at,
+        )
+        for asset in assets
+    ]
