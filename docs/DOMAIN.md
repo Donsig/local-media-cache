@@ -27,12 +27,12 @@ A transcoding configuration. Predefined by the user, referenced by subscriptions
 profiles
   id                  TEXT PRIMARY KEY      -- e.g. "5gb_1080p_h265"
   name                TEXT NOT NULL         -- human-readable
-  ffmpeg_args         TEXT NOT NULL         -- JSON array of args
+  ffmpeg_args         TEXT                  -- JSON array of args; NULL = passthrough
   target_size_bytes   INTEGER               -- used for size-budget UI hints
   created_at          TIMESTAMP NOT NULL
 ```
 
-A "passthrough" profile (no transcode, copy as-is) is a valid profile.
+**Passthrough profiles**: `ffmpeg_args = NULL` means "serve the source file as-is — no transcoding." The transcode worker skips ffmpeg entirely, computes sha256/size from the source file, and marks the asset ready immediately. `cache_path` stays NULL for passthrough assets; the download endpoint serves `source_path` directly. GC skips file deletion for passthrough assets (there is no cache file to delete — the source is on NFS, read-only). Use passthrough when the source is already in an appropriate format (e.g. H.264/AAC for Plex Direct Play) and re-encoding would waste time and disk with no quality benefit.
 
 ### Subscription
 
@@ -114,15 +114,19 @@ assignments
 ### Asset lifecycle
 
 ```
-[create] ─► queued ─► transcoding ─► ready
-                          │
-                          └────────► failed
-                                       │
-                                  (manual retry or
-                                   subscription removal)
+                    ┌─ passthrough profile (ffmpeg_args = NULL)
+[create] ─► queued ─┤
+                    └─ transcoding profile ─► transcoding ─► ready
+                                                  │
+                                                  └────────► failed
+                                                               │
+                                                          (manual retry or
+                                                           subscription removal)
 
-[no remaining assignments] ─► [delete row, remove cache_path file]
+[no remaining assignments] ─► [delete row, delete cache_path file if not NULL]
 ```
+
+For passthrough assets: `queued → ready` transition is immediate (no `transcoding` state). `cache_path` is always NULL. The download endpoint serves `source_path` directly.
 
 ### Assignment lifecycle
 

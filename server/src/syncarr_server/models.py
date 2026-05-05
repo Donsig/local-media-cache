@@ -37,7 +37,8 @@ class Profile(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    ffmpeg_args: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    ffmpeg_args: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # None = passthrough: serve source file directly, skip ffmpeg entirely
     target_size_bytes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
 

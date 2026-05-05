@@ -155,3 +155,35 @@ MVP ships with `PlexProvider` only. The agent also has a provider concept for tr
 **Decision**: aria2 configured for serial downloads, not parallel.
 
 **Why**: Caravan bandwidth is the bottleneck, not server concurrency. Multiple parallel downloads don't make total throughput faster, they just split it. Serial is simpler to reason about, simpler to monitor, and avoids weird interleaved-progress UI states. Parallel within a single file (aria2 `--split`) is fine; multiple files at once is not.
+
+## ADR-018: Transcode profile presets and passthrough
+
+**Decision**: Profiles support four `preset_type` values at the API/UI layer: `passthrough` | `prefer_quality` | `prefer_size` | `custom`. The underlying DB column is `ffmpeg_args` (JSON array, **nullable**):
+
+- **passthrough**: `ffmpeg_args = NULL`. No ffmpeg invocation. Source file served directly. Asset transitions `queued → ready` without a `transcoding` state; `cache_path` stays NULL; the download endpoint serves `source_path` from the NFS mount. GC skips file deletion for passthrough assets (no cache file was created).
+- **prefer_quality**: CRF-based H.265, quality-first. Template: `["-c:v", "libx265", "-crf", "23", "-preset", "medium", "-c:a", "aac", "-b:a", "128k"]`
+- **prefer_size**: constrained bitrate, smaller output. Template: `["-c:v", "libx265", "-crf", "28", "-maxrate", "2M", "-bufsize", "4M", "-c:a", "aac", "-b:a", "96k"]`
+- **custom**: user supplies raw `ffmpeg_args` array directly. Covers hardware-accelerated encoders (`hevc_nvenc`, `hevc_qsv`, `hevc_vaapi`).
+
+`preset_type` is resolved to `ffmpeg_args` by the server before persisting. The DB stores only `ffmpeg_args`.
+
+**Why**: Passthrough is the right choice when sources are already efficiently encoded — a WEBDL H.264 1080p file playing via Plex Direct Play needs no re-encoding. Transcoding it wastes CPU and may not meaningfully reduce file size. Passthrough as a first-class option removes the need to reason about "what ffmpeg args produce a copy."
+
+## ADR-019: Dual provider abstraction — source and destination
+
+**Decision**: The system has two provider boundaries, both abstracted:
+
+- **Source provider** (`MediaProvider`, server-side): the home media server — browse library, expand subscription scope, get file path, trigger scan. ADR-013. MVP: `PlexProvider`.
+- **Destination provider** (`ClientProvider`, agent-side): the satellite playback app — determine file placement path, trigger library scan after delivery. MVP: `FolderClientProvider` (drops files at the configured `library_root` with the relative path from the assignment; no explicit scan trigger — playback app auto-scans or user triggers manually).
+
+**Why**: The source and destination are independently variable. You might run Plex at home and Jellyfin on the caravan, or Emby on both, or Plex at home and a bare Kodi on the Pi. Abstracting both sides means neither the server nor the agent contains hardcoded media-server assumptions. For MVP (Plex/Plex), the destination provider is trivially thin — files dropped in the right folder and Plex handles discovery. The abstraction costs nothing upfront and prevents a rewrite when the second destination type is added.
+
+**What a ClientProvider interface looks like** (conceptual, for when a second implementation is needed):
+```python
+class ClientProvider(Protocol):
+    def resolve_path(self, relative_path: str) -> Path: ...      # map server relative_path → local absolute path
+    def after_delivery(self, library_id: str) -> None: ...       # trigger scan / notify app (no-op in MVP)
+    def after_eviction(self, local_path: Path) -> None: ...      # post-delete hook (no-op in MVP)
+```
+
+MVP `FolderClientProvider` implements all three as trivial operations: path join, no-op, no-op. Future `JellyfinClientProvider` would call the Jellyfin scan API in `after_delivery`.
