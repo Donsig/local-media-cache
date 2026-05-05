@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -164,9 +166,52 @@ class TestSettings:
     ui_token = "ui-token"
 
 
+@dataclass
+class MockFfmpeg:
+    calls: list[list[str]]
+    returncode: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    output_bytes: bytes = b"transcoded-output"
+
+    def set_result(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: str = "",
+        stderr: str = "",
+        output_bytes: bytes = b"transcoded-output",
+    ) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.output_bytes = output_bytes
+
+
 @pytest.fixture
 def auth_headers_ui() -> dict[str, str]:
     return {"Authorization": "Bearer ui-token"}
+
+
+@pytest.fixture
+def mock_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> MockFfmpeg:
+    mock = MockFfmpeg(calls=[])
+
+    def _run(cmd: list[str], capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        mock.calls.append(list(cmd))
+        if mock.returncode == 0:
+            Path(cmd[-1]).write_bytes(mock.output_bytes)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=mock.returncode,
+            stdout=mock.stdout,
+            stderr=mock.stderr,
+        )
+
+    monkeypatch.setattr("syncarr_server.transcoder.subprocess.run", _run)
+    return mock
 
 
 @pytest_asyncio.fixture

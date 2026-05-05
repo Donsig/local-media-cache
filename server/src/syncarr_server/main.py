@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,12 +9,15 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from syncarr_server.config import get_settings
+from syncarr_server.db import AsyncSessionLocal
 from syncarr_server.routes import agent, installer, media_browse, ui
+from syncarr_server.transcoder import TranscodeWorker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    worker = TranscodeWorker(AsyncSessionLocal, settings)
     app.state.media_provider = None
     if settings.media_server_url and settings.media_server_token:
         if settings.media_provider_type == "plex":
@@ -29,7 +33,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 f"Unknown media_provider_type: {settings.media_provider_type!r}. "
                 "Supported: 'plex'"
             )
-    yield
+    await worker.startup_recovery()
+    task = asyncio.create_task(worker.start())
+    try:
+        yield
+    finally:
+        await worker.stop()
+        await task
 
 
 app = FastAPI(title="Syncarr Server", lifespan=lifespan)
