@@ -178,6 +178,8 @@ MVP ships with `PlexProvider` only. The agent also has a provider concept for tr
 
 **Why**: The source and destination are independently variable. You might run Plex at home and Jellyfin on the caravan, or Emby on both, or Plex at home and a bare Kodi on the Pi. Abstracting both sides means neither the server nor the agent contains hardcoded media-server assumptions. For MVP (Plex/Plex), the destination provider is trivially thin — files dropped in the right folder and Plex handles discovery. The abstraction costs nothing upfront and prevents a rewrite when the second destination type is added.
 
+**Config**: `media_provider_type` (default: `"plex"`) selects the source provider at startup. Provider-agnostic field names (`media_server_url`, `media_server_token`, `media_server_path_prefix`) are used in `Settings` — not `plex_url`, `plex_token`. Adding a second provider requires only a new module in `providers/` and an `elif` branch in `main.py` lifespan.
+
 **What a ClientProvider interface looks like** (conceptual, for when a second implementation is needed):
 ```python
 class ClientProvider(Protocol):

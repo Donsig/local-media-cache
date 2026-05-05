@@ -42,7 +42,7 @@ A user's declared intent: "this client should have this content at this profile.
 subscriptions
   id                  INTEGER PRIMARY KEY
   client_id           TEXT NOT NULL REFERENCES clients(id)
-  media_item_id       TEXT NOT NULL         -- provider-specific item ID (e.g. Plex ratingKey)
+  media_item_id       TEXT NOT NULL         -- provider-specific item ID (e.g. Plex ratingKey, Jellyfin itemId)
   scope_type          TEXT NOT NULL         -- 'movie' | 'show:all' | 'show:seasons' | 'show:latest' | 'show:season_from'
   scope_params        TEXT                  -- JSON; shape depends on scope_type (NULL for 'movie' and 'show:all')
   profile_id          TEXT NOT NULL REFERENCES profiles(id)
@@ -209,7 +209,7 @@ The agent API derives an effective `state` field for each assignment. Assignment
 
 **Profile changed on existing subscription**: this is a delete-and-recreate from the assignment perspective. Old (client_id, old_asset_id) flips to evict. New (client_id, new_asset_id) created as pending. Old asset evicted from cache once no client references it.
 
-**Source file changed in Plex**: if Plex re-imports a file (different bitrate, edition, etc.), the `source_plex_id` may stay the same but the actual file is different. The transcoded asset is now stale. Detection mechanism: store source file mtime/size on the asset row, re-check on resolve, mark stale assets for re-transcode. **Deferred from MVP**; assume sources don't change.
+**Source file changed on provider**: if the provider re-imports a file (different bitrate, edition, etc.), the `source_media_id` may stay the same but the actual file is different. The transcoded asset is now stale. Detection mechanism: store source file mtime/size on the asset row, re-check on resolve, mark stale assets for re-transcode. **Deferred from MVP**; assume sources don't change.
 
 **Same content in multiple libraries**: out of scope for MVP. Subscriptions reference provider-specific item IDs (e.g. Plex ratingKeys, Jellyfin itemIds), which are assumed globally unique within a provider instance.
 
