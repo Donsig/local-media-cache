@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "syncarr-agent"
+version = "0.1.0"
+description = "Local media cache satellite agent"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "aria2p>=0.11",
+    "structlog>=24.4",
+]
+
+[project.scripts]
+syncarr-agent = "syncarr_agent.main:cli"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "respx>=0.21",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/syncarr_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["aria2p", "aria2p.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["respx", "respx.*"]
+ignore_missing_imports = true

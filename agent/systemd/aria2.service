@@ -1,0 +1,20 @@
+[Unit]
+Description=aria2 download daemon
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/syncarr-agent/aria2.env
+ExecStart=/usr/bin/aria2c \
+  --enable-rpc \
+  --rpc-listen-port=6800 \
+  --rpc-secret=${ARIA2_SECRET} \
+  --save-session=/var/lib/syncarr/aria2.session \
+  --input-file=/var/lib/syncarr/aria2.session \
+  --save-session-interval=60 \
+  --max-concurrent-downloads=1 \
+  --continue=true
+User=syncarr
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

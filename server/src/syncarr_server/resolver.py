@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -14,7 +17,26 @@ def _utc_now() -> datetime:
 
 
 async def gc_orphaned_assets(session: AsyncSession) -> None:
+    # Collect cache_path values before deleting rows so we can clean up files.
+    orphan_rows = list(
+        (
+            await session.execute(
+                select(Asset.cache_path).where(~Asset.assignments.any()),
+            )
+        ).scalars()
+    )
     await session.execute(delete(Asset).where(~Asset.assignments.any()))
+
+    # Delete any cache files outside the DB transaction — skip NULL (passthrough assets).
+    paths_to_delete = [p for p in orphan_rows if p is not None]
+    if paths_to_delete:
+
+        def _unlink_files(paths: list[str]) -> None:
+            for path in paths:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(path)
+
+        await asyncio.to_thread(_unlink_files, paths_to_delete)
 
 
 async def resolve_all_subscriptions(provider: MediaProvider, session: AsyncSession) -> None:

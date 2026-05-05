@@ -1,0 +1,14 @@
+[Unit]
+Description=Syncarr media sync agent
+After=network-online.target aria2.service
+Wants=aria2.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/syncarr-agent --config /etc/syncarr-agent/config.toml
+Restart=on-failure
+RestartSec=60
+User=syncarr
+
+[Install]
+WantedBy=multi-user.target

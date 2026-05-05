@@ -191,6 +191,12 @@ async def confirm_asset(
     if assignment.state == "delivered":
         return AgentConfirmResponse(ok=True)
 
+    if assignment.state == "evict":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Assignment is pending eviction; confirm evicted instead",
+        )
+
     if payload.actual_sha256 != asset.sha256 or payload.actual_size_bytes != asset.size_bytes:
         return AgentConfirmResponse(
             ok=False,
