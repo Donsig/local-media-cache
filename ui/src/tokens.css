@@ -1,0 +1,21 @@
+:root {
+  --bg0: #1a1815;
+  --bg1: #1f1d1a;
+  --bg2: #252220;
+  --bg3: #2e2b28;
+  --bg4: #38342f;
+  --border: #34302c;
+  --border2: #423d37;
+  --text0: #f5f0e8;
+  --text1: #d4cdc1;
+  --text2: #9b948a;
+  --text3: #6e675f;
+  --accent: #c08552;
+  --accent-dim: #c0855222;
+  --accent-text: #e6a472;
+  --state-ready: #7ea672;
+  --state-transcoding: #d4a373;
+  --state-queued: #8a8580;
+  --state-failed: #c87878;
+  --state-downloading: #7da3c8;
+}
