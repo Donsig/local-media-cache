@@ -56,3 +56,14 @@ export type MediaItemDetails = {
   item: MediaItem
   children: MediaItem[]
 }
+
+export type AssetRow = {
+  asset_id: number
+  media_item_id: string
+  profile_id: string
+  filename: string
+  status: string
+  status_detail: string | null
+  size_bytes: number | null
+  ready_at: string | null
+}

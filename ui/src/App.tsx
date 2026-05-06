@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import { ClientsScreen } from './screens/ClientsScreen'
 import { LibraryScreen } from './screens/LibraryScreen'
 import { ProfilesScreen } from './screens/ProfilesScreen'
+import { QueueScreen } from './screens/QueueScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 
-type Section = 'library' | 'clients' | 'profiles' | 'settings'
+type Section = 'library' | 'queue' | 'clients' | 'profiles' | 'settings'
 
 type NavItem = {
   label: string
@@ -14,6 +15,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: 'Library', value: 'library', eyebrow: 'Browse media' },
+  { label: 'Queue', value: 'queue', eyebrow: 'Transfer status' },
   { label: 'Clients', value: 'clients', eyebrow: 'Manage devices' },
   { label: 'Profiles', value: 'profiles', eyebrow: 'Transcode presets' },
   { label: 'Settings', value: 'settings', eyebrow: 'Server token' },
@@ -24,6 +26,8 @@ function App() {
 
   const screen = useMemo(() => {
     switch (activeSection) {
+      case 'queue':
+        return <QueueScreen />
       case 'clients':
         return <ClientsScreen />
       case 'profiles':
@@ -43,7 +47,7 @@ function App() {
           <div className="section-label">Syncarr</div>
           <h1 className="brand-title">Local Media Cache</h1>
           <p className="brand-copy">
-            Stage 2.5 UI scaffold for browsing libraries and managing server-side resources.
+            Selective media sync to satellite servers.
           </p>
         </div>
 

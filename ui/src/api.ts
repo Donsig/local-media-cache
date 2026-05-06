@@ -1,4 +1,5 @@
 import type {
+  AssetRow,
   Client,
   ClientAssignment,
   ClientCreateResponse,
@@ -123,6 +124,10 @@ export async function getLibraryItems(libraryId: string): Promise<MediaItem[]> {
 
 export async function getMediaItem(itemId: string): Promise<MediaItemDetails> {
   return request<MediaItemDetails>(`/api/media/item/${itemId}`)
+}
+
+export async function getAllAssets(): Promise<AssetRow[]> {
+  return request<AssetRow[]>('/api/assets')
 }
 
 export async function getClientAssignments(

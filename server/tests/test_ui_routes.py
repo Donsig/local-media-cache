@@ -283,7 +283,9 @@ async def test_get_assets(
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
+    assert data[0]["asset_id"] == asset.id
     assert data[0]["media_item_id"] == "ep-42"
+    assert data[0]["filename"] == "ep42.mkv"
     assert data[0]["status"] == "queued"
     assert data[0]["profile_id"] == "p-test"
 
@@ -343,3 +345,58 @@ async def test_list_client_assignments(
 
     assert other_client_response.status_code == 200
     assert other_client_response.json() == []
+
+
+async def test_list_all_assets_no_filter(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    profile = Profile(
+        id="p-all",
+        name="All Assets Profile",
+        ffmpeg_args=None,
+        target_size_bytes=None,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(profile)
+    await db_session.flush()
+
+    asset1 = Asset(
+        source_media_id="ep-older",
+        profile_id="p-all",
+        source_path="/mnt/media/older.mkv",
+        cache_path=None,
+        size_bytes=None,
+        sha256=None,
+        status="queued",
+        status_detail=None,
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        ready_at=None,
+    )
+    asset2 = Asset(
+        source_media_id="ep-newer",
+        profile_id="p-all",
+        source_path="/mnt/media/newer.mkv",
+        cache_path=None,
+        size_bytes=None,
+        sha256=None,
+        status="ready",
+        status_detail=None,
+        created_at=datetime(2025, 6, 1, tzinfo=UTC),
+        ready_at=None,
+    )
+    db_session.add(asset1)
+    db_session.add(asset2)
+    await db_session.commit()
+
+    response = await http_client.get("/assets", headers=auth_headers_ui)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    # Ordered by created_at DESC — newer first
+    assert data[0]["media_item_id"] == "ep-newer"
+    assert data[0]["status"] == "ready"
+    assert data[1]["media_item_id"] == "ep-older"
+    assert data[1]["status"] == "queued"

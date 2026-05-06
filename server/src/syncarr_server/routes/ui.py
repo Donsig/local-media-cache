@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -453,16 +454,18 @@ async def list_assets(
     media_item_ids: str = "",
 ) -> list[AssetStatusSchema]:
     ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
-    if not ids:
-        return []
-    assets = list(
-        (await session.execute(select(Asset).where(Asset.source_media_id.in_(ids)))).scalars()
-    )
+    query = select(Asset).order_by(Asset.created_at.desc())
+    if ids:
+        query = query.where(Asset.source_media_id.in_(ids))
+    assets = list((await session.execute(query)).scalars())
     return [
         AssetStatusSchema(
+            asset_id=asset.id,
             media_item_id=asset.source_media_id,
             profile_id=asset.profile_id,
+            filename=Path(asset.source_path).name,
             status=asset.status,
+            status_detail=asset.status_detail,
             size_bytes=asset.size_bytes,
             ready_at=asset.ready_at,
         )

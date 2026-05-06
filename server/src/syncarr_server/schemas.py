@@ -161,9 +161,12 @@ class SubscriptionsResponse(Schema):
 
 
 class AssetStatusSchema(Schema):
+    asset_id: int
     media_item_id: str
     profile_id: str
+    filename: str
     status: str
+    status_detail: str | None = None
     size_bytes: int | None = None
     ready_at: datetime | None = None
 

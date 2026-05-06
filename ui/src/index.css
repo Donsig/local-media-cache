@@ -565,6 +565,10 @@ a {
   color: var(--text3);
   font-size: 11px;
   font-family: 'DM Mono', monospace;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sync-pill:disabled {
@@ -578,11 +582,12 @@ a {
 
 .sync-pill--on {
   background: var(--accent);
-  color: var(--bg0);
+  color: #fff;
 }
 
 .sync-pill--pending {
   background: var(--accent-dim);
+  border: 1px solid var(--accent-dim);
   color: var(--accent-text);
 }
 
@@ -630,6 +635,69 @@ a {
 
 .sync-pill-picker__error {
   margin: 0;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.queue-row:last-child {
+  border-bottom: 0;
+}
+
+.queue-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.queue-row__filename {
+  font-size: 13px;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-row__detail {
+  font-size: 11px;
+  color: var(--state-failed);
+}
+
+.queue-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.queue-row__profile {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: 'DM Mono', monospace;
+}
+
+.queue-row__size {
+  font-size: 12px;
+  color: var(--text2);
+  font-family: 'DM Mono', monospace;
+}
+
+.queue-row__ready {
+  font-size: 11px;
+  color: var(--text3);
 }
 
 @media (max-width: 960px) {

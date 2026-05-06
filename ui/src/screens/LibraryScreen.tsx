@@ -20,7 +20,6 @@ import { getAssets } from '../api/media'
 import { Badge } from '../components/Badge'
 import { Btn } from '../components/Btn'
 import { IcoChevR, IcoFilm, IcoSearch, IcoTV } from '../components/icons'
-import { PillTabs } from '../components/PillTabs'
 import { SynInput } from '../components/SynInput'
 import type { Client, ClientAssignment, MediaItem, Profile } from '../types'
 
@@ -591,7 +590,6 @@ function LibrarySection({
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function LibraryScreen() {
-  const [activeFilter, setActiveFilter] = useState('all')
   const [search, setSearch] = useState('')
 
   const librariesQuery = useQuery({
@@ -619,7 +617,7 @@ export function LibraryScreen() {
     librariesQuery.isLoading || clientsQuery.isLoading || profilesQuery.isLoading
   const error = librariesQuery.error ?? clientsQuery.error ?? profilesQuery.error ?? null
 
-  const clearVisible = Boolean(search.trim()) || activeFilter !== 'all'
+  const clearVisible = Boolean(search.trim())
 
   return (
     <section className="screen">
@@ -633,18 +631,6 @@ export function LibraryScreen() {
 
       <div className="card">
         <div className="library-toolbar">
-          <PillTabs
-            tabs={[
-              { label: 'All', value: 'all' },
-              { label: 'Ready', value: 'ready' },
-              { label: 'Transcoding', value: 'transcoding' },
-              { label: 'Downloading', value: 'downloading' },
-              { label: 'Queued', value: 'queued' },
-              { label: 'Failed', value: 'failed' },
-            ]}
-            active={activeFilter}
-            onChange={setActiveFilter}
-          />
           <div className="inline-cluster">
             <SynInput
               value={search}
@@ -653,13 +639,7 @@ export function LibraryScreen() {
               prefixIcon={<IcoSearch />}
             />
             {clearVisible ? (
-              <Btn
-                size="small"
-                onClick={() => {
-                  setSearch('')
-                  setActiveFilter('all')
-                }}
-              >
+              <Btn size="small" onClick={() => setSearch('')}>
                 Clear
               </Btn>
             ) : null}
