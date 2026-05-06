@@ -221,12 +221,8 @@ function useLibraryTree() {
     }))
   }, [librariesQuery.data, libraryItemsQueries, topLevelDetailsQueries, seasonDetailsQueries])
 
-  const isLoading =
-    librariesQuery.isLoading ||
-    clientsQuery.isLoading ||
-    libraryItemsQueries.some((query) => query.isLoading) ||
-    topLevelDetailsQueries.some((query) => query.isLoading) ||
-    seasonDetailsQueries.some((query) => query.isLoading)
+  // Only block render until the library list itself is ready — details load in background
+  const isLoading = librariesQuery.isLoading || clientsQuery.isLoading
 
   const error =
     librariesQuery.error ??
@@ -314,7 +310,7 @@ export function LibraryScreen() {
   const toggleOpen = (id: string) => {
     setOpenMap((current) => ({
       ...current,
-      [id]: !current[id],
+      [id]: !(current[id] ?? false),
     }))
   }
 
@@ -374,7 +370,7 @@ export function LibraryScreen() {
           ) : null}
 
           {filteredLibraries.map((library) => {
-            const libraryOpen = openMap[library.id] ?? true
+            const libraryOpen = openMap[library.id] ?? false
 
             return (
               <div key={library.id}>
