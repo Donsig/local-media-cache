@@ -37,12 +37,15 @@ def _delete_control_file(local_path: Path) -> None:
     _delete_if_exists(local_path.with_suffix(".aria2"))
 
 
-def _try_rmdir(directory: Path) -> None:
-    """Remove directory if empty; silently ignore if non-empty or missing."""
-    try:
-        os.rmdir(directory)
-    except OSError:
-        pass
+def _cleanup_empty_parents(path: Path, root: Path) -> None:
+    """Remove empty parent dirs walking up from path, stopping before root."""
+    current = path
+    while current != root and current != current.parent:
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = current.parent
 
 
 def reconcile(
@@ -56,9 +59,9 @@ def reconcile(
 ) -> None:
     for assignment in assignments:
         asset_id = assignment.asset_id
-        asset_dir = library_root / str(asset_id)
-        local_path = asset_dir / assignment.filename
-        bound = log.bind(asset_id=asset_id, filename=assignment.filename)
+        local_path = library_root / assignment.relative_path
+        asset_dir = local_path.parent
+        bound = log.bind(asset_id=asset_id, filename=local_path.name)
 
         if assignment.state == "queued":
             # Asset not ready yet — nothing to do.
@@ -82,6 +85,7 @@ def reconcile(
                 asset_id=asset_id,
                 asset_dir=asset_dir,
                 local_path=local_path,
+                library_root=library_root,
                 state=state,
                 aria2=aria2,
                 server=server,
@@ -164,7 +168,7 @@ def _handle_ready(
     asset_dir.mkdir(parents=True, exist_ok=True)
     gid = aria2.add_download(
         url=assignment.download_url,
-        filename=assignment.filename,
+        filename=local_path.name,
         directory=asset_dir,
         sha256=assignment.sha256 or "",
         auth_token=server_token,
@@ -213,7 +217,7 @@ def _confirm_or_requeue(
         asset_dir.mkdir(parents=True, exist_ok=True)
         gid = aria2.add_download(
             url=assignment.download_url,
-            filename=assignment.filename,
+            filename=local_path.name,
             directory=asset_dir,
             sha256=assignment.sha256 or "",
             auth_token=server_token,
@@ -227,6 +231,7 @@ def _handle_evict(
     asset_id: int,
     asset_dir: Path,
     local_path: Path,
+    library_root: Path,
     state: StateDB,
     aria2: Aria2Client,
     server: ServerClient,
@@ -241,10 +246,10 @@ def _handle_evict(
             # Safety: do NOT confirm eviction if removal failed — aria2 may still be writing.
             return
 
-    # Delete local file and control file.
+    # Delete local file and control file, then clean up empty parent dirs.
     _delete_if_exists(local_path)
     _delete_control_file(local_path)
-    _try_rmdir(asset_dir)
+    _cleanup_empty_parents(asset_dir, library_root)
 
     server.confirm_evicted(asset_id)
     state.delete(asset_id)

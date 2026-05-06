@@ -182,7 +182,7 @@ class AgentAssignmentSchema(Schema):
     asset_id: int
     state: AgentAssignmentState
     source_media_id: str
-    filename: str
+    relative_path: str
     size_bytes: int | None = None
     sha256: str | None = None
     download_url: str | None = None

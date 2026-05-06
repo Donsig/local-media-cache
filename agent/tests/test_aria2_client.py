@@ -22,11 +22,20 @@ def _make_mock_download(status: str = "active") -> MagicMock:
 
 @patch("syncarr_agent.aria2_client.aria2p.API")
 @patch("syncarr_agent.aria2_client.aria2p.Client")
-def test_constructor_uses_host_port_not_url(
+def test_constructor_normalizes_bare_host_to_http(
     mock_client_cls: MagicMock, mock_api_cls: MagicMock
 ) -> None:
     Aria2Client("127.0.0.1", 6800, "")
-    mock_client_cls.assert_called_once_with(host="127.0.0.1", port=6800, secret=None)
+    mock_client_cls.assert_called_once_with(host="http://127.0.0.1", port=6800, secret=None)
+
+
+@patch("syncarr_agent.aria2_client.aria2p.API")
+@patch("syncarr_agent.aria2_client.aria2p.Client")
+def test_constructor_preserves_existing_scheme(
+    mock_client_cls: MagicMock, mock_api_cls: MagicMock
+) -> None:
+    Aria2Client("http://localhost", 6800, "")
+    mock_client_cls.assert_called_once_with(host="http://localhost", port=6800, secret=None)
 
 
 @patch("syncarr_agent.aria2_client.aria2p.API")
@@ -35,7 +44,7 @@ def test_constructor_passes_secret(
     mock_client_cls: MagicMock, mock_api_cls: MagicMock
 ) -> None:
     Aria2Client("127.0.0.1", 6800, "mysecret")
-    mock_client_cls.assert_called_once_with(host="127.0.0.1", port=6800, secret="mysecret")
+    mock_client_cls.assert_called_once_with(host="http://127.0.0.1", port=6800, secret="mysecret")
 
 
 @patch("syncarr_agent.aria2_client.aria2p.API")

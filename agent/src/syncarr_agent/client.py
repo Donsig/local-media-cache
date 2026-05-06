@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -13,7 +14,7 @@ class AssignmentItem:
     asset_id: int
     state: str  # 'ready' | 'queued' | 'evict'
     source_media_id: str
-    filename: str
+    relative_path: str  # POSIX path relative to library root, mirrors server library structure
     sha256: str | None  # only when state='ready'
     size_bytes: int | None  # only when state='ready'
     download_url: str | None  # absolute URL — normalised in get_assignments()
@@ -73,12 +74,16 @@ class ServerClient:
             absolute_url: str | None = None
             if raw_url is not None:
                 absolute_url = f"{self._server_url}{raw_url}"
+            rel_path = str(raw["relative_path"])
+            _p = Path(rel_path)
+            if _p.is_absolute() or ".." in _p.parts:
+                raise ValueError(f"Unsafe relative_path in assignment: {rel_path!r}")
             assignments.append(
                 AssignmentItem(
                     asset_id=int(raw["asset_id"]),
                     state=raw["state"],
                     source_media_id=str(raw.get("source_media_id", "")),
-                    filename=raw["filename"],
+                    relative_path=rel_path,
                     sha256=raw.get("sha256"),
                     size_bytes=raw.get("size_bytes"),
                     download_url=absolute_url,

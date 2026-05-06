@@ -18,7 +18,7 @@ FULL_RESPONSE = {
             "asset_id": 1234,
             "state": "ready",
             "source_media_id": "12345",
-            "filename": "Bluey - S02E01 - Dance Mode.mkv",
+            "relative_path": "Bluey (2018)/Season 2/Bluey - S02E01 - Dance Mode.mkv",
             "size_bytes": 5120000000,
             "sha256": "abc123def456",
             "download_url": "/download/1234",
@@ -27,13 +27,13 @@ FULL_RESPONSE = {
             "asset_id": 1235,
             "state": "queued",
             "source_media_id": "12346",
-            "filename": "Bluey - S02E02 - Bumpy.mkv",
+            "relative_path": "Bluey (2018)/Season 2/Bluey - S02E02 - Bumpy.mkv",
         },
         {
             "asset_id": 1100,
             "state": "evict",
             "source_media_id": "11000",
-            "filename": "Bluey - S01E01 - Magic Xylophone.mkv",
+            "relative_path": "Bluey (2018)/Season 1/Bluey - S01E01 - Magic Xylophone.mkv",
         },
     ],
     "stats": {
@@ -171,3 +171,35 @@ def test_confirm_evicted_404_treated_as_success() -> None:
         client = _make_client(router)
         # Should not raise
         client.confirm_evicted(55)
+
+
+def test_get_assignments_parses_relative_path() -> None:
+    with respx.mock(base_url=SERVER_URL) as router:
+        router.get("/assignments").mock(return_value=httpx.Response(200, json=FULL_RESPONSE))
+        client = _make_client(router)
+        resp = client.get_assignments()
+
+    ready = next(a for a in resp.assignments if a.state == "ready")
+    assert ready.relative_path == "Bluey (2018)/Season 2/Bluey - S02E01 - Dance Mode.mkv"
+
+
+def test_get_assignments_rejects_path_traversal() -> None:
+    bad_response = {
+        **FULL_RESPONSE,
+        "assignments": [
+            {
+                "asset_id": 999,
+                "state": "ready",
+                "source_media_id": "x",
+                "relative_path": "../../etc/passwd",
+                "size_bytes": 1,
+                "sha256": "abc",
+                "download_url": "/download/999",
+            }
+        ],
+    }
+    with respx.mock(base_url=SERVER_URL) as router:
+        router.get("/assignments").mock(return_value=httpx.Response(200, json=bad_response))
+        client = _make_client(router)
+        with pytest.raises(ValueError, match="Unsafe"):
+            client.get_assignments()

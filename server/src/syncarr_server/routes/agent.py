@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.auth import require_agent_auth
+from syncarr_server.config import Settings, get_settings
 from syncarr_server.db import get_session
 from syncarr_server.models import Asset, Assignment, Client
 from syncarr_server.resolver import gc_orphaned_assets
@@ -29,8 +30,11 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _filename(asset: Asset) -> str:
-    return Path(asset.source_path).name
+def _relative_path(source_path: str, local_path_prefix: str) -> str:
+    try:
+        return str(Path(source_path).relative_to(local_path_prefix).as_posix())
+    except ValueError:
+        return Path(source_path).name
 
 
 def _effective_state(assignment: Assignment, asset: Asset) -> AgentAssignmentState | None:
@@ -47,20 +51,21 @@ def _assignment_schema(
     assignment: Assignment,
     asset: Asset,
     effective_state: AgentAssignmentState,
+    rel_path: str,
 ) -> AgentAssignmentSchema:
     if effective_state != "ready":
         return AgentAssignmentSchema(
             asset_id=asset.id,
             state=effective_state,
             source_media_id=asset.source_media_id,
-            filename=_filename(asset),
+            relative_path=rel_path,
         )
 
     return AgentAssignmentSchema(
         asset_id=asset.id,
         state=effective_state,
         source_media_id=asset.source_media_id,
-        filename=_filename(asset),
+        relative_path=rel_path,
         size_bytes=asset.size_bytes,
         sha256=asset.sha256,
         download_url=f"/download/{assignment.asset_id}",
@@ -92,6 +97,7 @@ async def _get_assignment_asset(
 async def list_assignments(
     client: Annotated[Client, Depends(require_agent_auth)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> AgentAssignmentsResponse:
     now = _utc_now()
     await session.execute(
@@ -125,7 +131,8 @@ async def list_assignments(
         else:
             evict_count += 1
 
-        assignments.append(_assignment_schema(assignment, asset, effective_state))
+        rel_path = _relative_path(asset.source_path, settings.local_path_prefix)
+        assignments.append(_assignment_schema(assignment, asset, effective_state, rel_path))
 
     await session.commit()
     return AgentAssignmentsResponse(

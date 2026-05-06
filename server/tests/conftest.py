@@ -165,6 +165,7 @@ class MockMediaProvider:
 
 class TestSettings:
     ui_token = "ui-token"
+    local_path_prefix = "/mnt/media"
 
 
 @dataclass

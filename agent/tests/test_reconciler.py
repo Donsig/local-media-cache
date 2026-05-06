@@ -19,7 +19,7 @@ def _assignment(
     *,
     asset_id: int = 1234,
     state: str = "ready",
-    filename: str = "Bluey - S02E01 - Dance Mode.mkv",
+    relative_path: str = "Bluey (2018)/Season 2/Bluey - S02E01 - Dance Mode.mkv",
     sha256: str | None = "expected-sha256",
     size_bytes: int | None = 1024,
     download_url: str | None = "http://server:8000/download/1234",
@@ -28,7 +28,7 @@ def _assignment(
         asset_id=asset_id,
         state=state,
         source_media_id="source-1234",
-        filename=filename,
+        relative_path=relative_path,
         sha256=sha256,
         size_bytes=size_bytes,
         download_url=download_url,
@@ -36,7 +36,7 @@ def _assignment(
 
 
 def _local_path(library_root: Path, assignment: AssignmentItem) -> Path:
-    return library_root / str(assignment.asset_id) / assignment.filename
+    return library_root / assignment.relative_path
 
 
 def _write_file(path: Path, content: bytes) -> None:
@@ -100,7 +100,7 @@ def test_ready_no_state_no_file_queues_download(
     assert mock_aria2._add_calls == [
         {
             "url": assignment.download_url,
-            "filename": assignment.filename,
+            "filename": local_path.name,
             "directory": local_path.parent,
             "sha256": assignment.sha256,
             "auth_token": SERVER_TOKEN,
@@ -177,7 +177,7 @@ def test_ready_complete_sha256_mismatch_requeues(
     assert not local_path.exists()
     assert len(mock_aria2._add_calls) == 1
     assert mock_aria2._add_calls[0]["url"] == assignment.download_url
-    assert mock_aria2._add_calls[0]["filename"] == assignment.filename
+    assert mock_aria2._add_calls[0]["filename"] == local_path.name
     assert mock_aria2._add_calls[0]["sha256"] == assignment.sha256
     assert mock_aria2._add_calls[0]["auth_token"] == SERVER_TOKEN
     assert mock_state.upserted == [
@@ -332,3 +332,73 @@ def test_evict_aria2_remove_raises_does_not_confirm(
 
     assert mock_server.evicted_confirms == []
     assert mock_state.deleted == []
+
+
+def test_download_uses_library_structure(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Files land at library_root/relative_path, not library_root/<asset_id>/filename."""
+    assignment = _assignment(
+        relative_path="TV Shows/Bluey (2018)/Season 1/Bluey - S01E01.mkv"
+    )
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    expected_dir = tmp_library_root / "TV Shows" / "Bluey (2018)" / "Season 1"
+    assert mock_aria2._add_calls[0]["directory"] == expected_dir
+    assert mock_aria2._add_calls[0]["filename"] == "Bluey - S01E01.mkv"
+
+
+def test_evict_removes_empty_parent_dirs(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """After eviction, empty show/season dirs are cleaned up."""
+    assignment = _assignment(
+        state="evict",
+        relative_path="TV Shows/Bluey (2018)/Season 1/Bluey - S01E01.mkv",
+        sha256=None,
+        size_bytes=None,
+        download_url=None,
+    )
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, b"media to evict")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert not local_path.exists()
+    assert not local_path.parent.exists()  # Season 1 removed
+    assert not (tmp_library_root / "TV Shows" / "Bluey (2018)").exists()  # show dir removed
+    assert not (tmp_library_root / "TV Shows").exists()  # TV Shows dir removed
+    assert tmp_library_root.exists()  # library root preserved
+
+
+def test_evict_leaves_non_empty_parent_dirs(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Walk-up stops at first non-empty dir."""
+    assignment = _assignment(
+        state="evict",
+        relative_path="TV Shows/Bluey (2018)/Season 1/Bluey - S01E01.mkv",
+        sha256=None,
+        size_bytes=None,
+        download_url=None,
+    )
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, b"to evict")
+    sibling = tmp_library_root / "TV Shows" / "Bluey (2018)" / "Season 1" / "S01E02.mkv"
+    _write_file(sibling, b"keep this")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert not local_path.exists()
+    assert local_path.parent.exists()  # Season 1 still has S01E02
+    assert sibling.exists()
