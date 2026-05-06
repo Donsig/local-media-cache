@@ -10,8 +10,55 @@ from fastapi.staticfiles import StaticFiles
 
 from syncarr_server.config import get_settings
 from syncarr_server.db import AsyncSessionLocal
+from syncarr_server.models import Profile
 from syncarr_server.routes import agent, installer, media_browse, ui
 from syncarr_server.transcoder import TranscodeWorker
+
+_DEFAULT_PROFILES: list[dict[str, object]] = [
+    {
+        "id": "passthrough",
+        "name": "No Transcode (copy original)",
+        "ffmpeg_args": None,
+        "target_size_bytes": None,
+    },
+    {
+        "id": "h265-720p",
+        "name": "Compact — 720p H.265",
+        "ffmpeg_args": [
+            "-vf", "scale=-2:720",
+            "-c:v", "libx265", "-crf", "28", "-preset", "fast",
+            "-c:a", "aac", "-b:a", "96k",
+        ],
+        "target_size_bytes": None,
+    },
+    {
+        "id": "h265-1080p",
+        "name": "Standard — 1080p H.265",
+        "ffmpeg_args": [
+            "-c:v", "libx265", "-crf", "23", "-preset", "medium",
+            "-c:a", "aac", "-b:a", "128k",
+        ],
+        "target_size_bytes": None,
+    },
+]
+
+
+async def _seed_default_profiles() -> None:
+    """Insert built-in profiles if they don't already exist. Idempotent."""
+    from datetime import UTC, datetime
+
+    async with AsyncSessionLocal() as session:
+        for spec in _DEFAULT_PROFILES:
+            existing = await session.get(Profile, spec["id"])
+            if existing is None:
+                session.add(Profile(
+                    id=spec["id"],
+                    name=spec["name"],
+                    ffmpeg_args=spec["ffmpeg_args"],
+                    target_size_bytes=spec["target_size_bytes"],
+                    created_at=datetime.now(UTC),
+                ))
+        await session.commit()
 
 
 @asynccontextmanager
@@ -33,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 f"Unknown media_provider_type: {settings.media_provider_type!r}. "
                 "Supported: 'plex'"
             )
+    await _seed_default_profiles()
     await worker.startup_recovery()
     task = asyncio.create_task(worker.start())
     try:
