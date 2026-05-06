@@ -106,7 +106,7 @@ Pass "T1.sub" "Subscription created id=$SubId"
 
 # Passthrough -> stat+sha256 of source file; can take ~3 min for large files on NFS
 $readyAssignment = $null
-$ok = Wait-For -TimeoutSec 600 -IntervalSec 10 -Label "asset ready" -Cond {
+$ok = Wait-For -TimeoutSec 90 -IntervalSec 5 -Label "asset ready" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
@@ -148,7 +148,7 @@ else { Fail "T2.aria2survives" "aria2 stopped when agent was killed" }
 ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 
-$ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery confirmed" -Cond {
+$ok = Wait-For -TimeoutSec 180 -IntervalSec 10 -Label "delivery confirmed" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
@@ -186,7 +186,7 @@ Info "Re-subscribed, new subscription id=$SubId"
 
 # Wait for new asset to be ready
 $readyAssignment = $null
-$ok = Wait-For -TimeoutSec 300 -IntervalSec 5 -Label "asset ready (re-subscribed)" -Cond {
+$ok = Wait-For -TimeoutSec 90 -IntervalSec 5 -Label "asset ready (re-subscribed)" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
@@ -219,7 +219,7 @@ ssh satellite "systemctl --user start aria2"
 if ((ssh satellite "systemctl --user is-active aria2") -eq "active") { Pass "T3.restart" "aria2 restarted" }
 else { Fail "T3.restart" "aria2 failed to restart" }
 
-$ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery after aria2 restart" -Cond {
+$ok = Wait-For -TimeoutSec 180 -IntervalSec 10 -Label "delivery after aria2 restart" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
