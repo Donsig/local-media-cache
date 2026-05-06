@@ -40,6 +40,8 @@ def _is_not_found(exc: aria2p.ClientException) -> bool:
 
 class Aria2Client:
     def __init__(self, host: str, port: int, secret: str) -> None:
+        if "://" not in host:
+            host = f"http://{host}"
         rpc_client = aria2p.Client(
             host=host,
             port=port,
