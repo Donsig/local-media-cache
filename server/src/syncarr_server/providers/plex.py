@@ -32,7 +32,7 @@ class PlexProvider:
         ]
 
     def browse_library(self, library_id: str, search: str | None = None) -> list[MediaItem]:
-        section = self._plex.library.sectionByID(library_id)
+        section = self._plex.library.sectionByID(int(library_id))
         items = section.search(title=search) if search else section.all()
         return [self._to_media_item(item) for item in items]
 
