@@ -37,11 +37,11 @@ class PlexProvider:
         return [self._to_media_item(item) for item in items]
 
     def get_item(self, media_item_id: str) -> MediaItemDetails:
-        item = self._plex.fetchItem(media_item_id)
+        item = self._plex.fetchItem(int(media_item_id))
         return MediaItemDetails(item=self._to_media_item(item), children=self._children_for(item))
 
     def preview_item(self, media_item_id: str) -> MediaPreview:
-        item = self._plex.fetchItem(media_item_id)
+        item = self._plex.fetchItem(int(media_item_id))
         files = self._file_items_for(item)
         return MediaPreview(
             item_id=media_item_id,
@@ -55,7 +55,7 @@ class PlexProvider:
         scope_type: str,
         scope_params: dict[str, object] | None,
     ) -> list[MediaItem]:
-        item = self._plex.fetchItem(media_item_id)
+        item = self._plex.fetchItem(int(media_item_id))
 
         if scope_type == "movie":
             return [self._to_media_item(item)]
