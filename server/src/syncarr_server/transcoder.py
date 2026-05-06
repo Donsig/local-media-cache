@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import structlog
+
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -55,7 +57,10 @@ class TranscodeWorker:
 
         try:
             while not self._stop_event.is_set():
-                await self.run_once()
+                try:
+                    await self.run_once()
+                except Exception as exc:
+                    structlog.get_logger().error("transcoder.run_once_error", error=str(exc))
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
