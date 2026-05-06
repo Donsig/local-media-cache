@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from syncarr_server.config import Settings
 from syncarr_server.models import Asset, Profile
-from syncarr_server.transcoder import TranscodeWorker
+from syncarr_server.transcoder import PassthroughWorker, TranscodeWorker
 
 from .conftest import MockFfmpeg
 
@@ -304,6 +304,64 @@ async def test_ffmpeg_args_from_profile(
     ]
 
 
+async def test_transcode_worker_skips_passthrough_asset(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    mock_ffmpeg: MockFfmpeg,
+) -> None:
+    source_path = tmp_path / "source.mkv"
+    source_path.write_bytes(b"passthrough-video")
+
+    await _insert_profile(
+        db_session_factory,
+        profile_id="profile-1",
+        ffmpeg_args=None,
+    )
+    asset_id = await _insert_asset(
+        db_session_factory,
+        source_media_id="media-1",
+        profile_id="profile-1",
+        source_path=source_path,
+    )
+
+    worker = TranscodeWorker(db_session_factory, _make_settings(tmp_path / "cache"))
+
+    await worker.run_once()
+    asset = await _get_asset(db_session_factory, asset_id)
+
+    assert asset.status == "queued"
+    assert mock_ffmpeg.calls == []
+
+
+async def test_passthrough_worker_skips_transcode_asset(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    mock_ffmpeg: MockFfmpeg,
+) -> None:
+    source_path = tmp_path / "source.mkv"
+    source_path.write_bytes(b"source-video")
+
+    await _insert_profile(
+        db_session_factory,
+        profile_id="profile-1",
+        ffmpeg_args=["-c:v", "libx265"],
+    )
+    asset_id = await _insert_asset(
+        db_session_factory,
+        source_media_id="media-1",
+        profile_id="profile-1",
+        source_path=source_path,
+    )
+
+    worker = PassthroughWorker(db_session_factory, _make_settings(tmp_path / "cache"))
+
+    await worker.run_once()
+    asset = await _get_asset(db_session_factory, asset_id)
+
+    assert asset.status == "queued"
+    assert mock_ffmpeg.calls == []
+
+
 async def test_passthrough_asset_skips_ffmpeg(
     db_session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
@@ -325,7 +383,7 @@ async def test_passthrough_asset_skips_ffmpeg(
         source_path=source_path,
     )
 
-    worker = TranscodeWorker(db_session_factory, _make_settings(tmp_path / "cache"))
+    worker = PassthroughWorker(db_session_factory, _make_settings(tmp_path / "cache"))
 
     await worker.run_once()
     asset = await _get_asset(db_session_factory, asset_id)
@@ -368,7 +426,7 @@ async def test_passthrough_asset_no_transcoding_state(
         return len(source_bytes), hashlib.sha256(source_bytes).hexdigest()
 
     monkeypatch.setattr("syncarr_server.transcoder._stat_and_hash", _blocking_stat_and_hash)
-    worker = TranscodeWorker(db_session_factory, _make_settings(tmp_path / "cache"))
+    worker = PassthroughWorker(db_session_factory, _make_settings(tmp_path / "cache"))
 
     task = asyncio.create_task(worker.run_once())
     await asyncio.to_thread(started.wait, 5)

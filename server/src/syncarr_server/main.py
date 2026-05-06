@@ -12,7 +12,7 @@ from syncarr_server.config import get_settings
 from syncarr_server.db import AsyncSessionLocal
 from syncarr_server.models import Profile
 from syncarr_server.routes import agent, installer, media_browse, ui
-from syncarr_server.transcoder import TranscodeWorker
+from syncarr_server.transcoder import PassthroughWorker, TranscodeWorker
 
 _DEFAULT_PROFILES: list[dict[str, object]] = [
     {
@@ -65,6 +65,7 @@ async def _seed_default_profiles() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     worker = TranscodeWorker(AsyncSessionLocal, settings)
+    passthrough_worker = PassthroughWorker(AsyncSessionLocal, settings)
     app.state.media_provider = None
     if settings.media_server_url and settings.media_server_token:
         if settings.media_provider_type == "plex":
@@ -83,11 +84,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _seed_default_profiles()
     await worker.startup_recovery()
     task = asyncio.create_task(worker.start())
+    passthrough_task = asyncio.create_task(passthrough_worker.start())
     try:
         yield
     finally:
-        await worker.stop()
-        await task
+        await asyncio.gather(worker.stop(), passthrough_worker.stop())
+        await asyncio.gather(task, passthrough_task, return_exceptions=True)
 
 
 app = FastAPI(title="Syncarr Server", lifespan=lifespan)
