@@ -66,8 +66,8 @@ class Aria2Client:
         }
         if sha256:
             options["checksum"] = f"sha-256={sha256}"
-        downloads = self._api.add_uris([url], options=options)
-        return str(downloads[0].gid)
+        download = self._api.add_uris([url], options=options)
+        return str(download.gid)
 
     def get_status(self, gid: str) -> DownloadInfo:
         dl = self._api.get_download(gid)
