@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(secrets_dir="/run/secrets")
+
     database_url: str = "sqlite+aiosqlite:////data/syncarr.db"
     media_cache_path: str = "/mnt/cache"
     transcode_poll_interval_seconds: int = 30

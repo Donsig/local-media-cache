@@ -168,7 +168,7 @@ def test_remove_ignores_not_found_error(
 ) -> None:
     mock_api_instance = MagicMock()
     mock_dl = MagicMock()
-    mock_dl.remove.side_effect = aria2p.ClientException("GID#abc is not found")
+    mock_dl.remove.side_effect = aria2p.ClientException(1, "GID#abc is not found")
     mock_api_instance.get_download.return_value = mock_dl
     mock_api_cls.return_value = mock_api_instance
 
@@ -184,7 +184,7 @@ def test_remove_raises_on_rpc_error(
 ) -> None:
     mock_api_instance = MagicMock()
     mock_dl = MagicMock()
-    mock_dl.remove.side_effect = aria2p.ClientException("Internal server error")
+    mock_dl.remove.side_effect = aria2p.ClientException(1, "Internal server error")
     mock_api_instance.get_download.return_value = mock_dl
     mock_api_cls.return_value = mock_api_instance
 

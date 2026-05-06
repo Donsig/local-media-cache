@@ -18,7 +18,8 @@ COPY server/src ./src
 RUN pip install --no-cache-dir .
 
 COPY --from=ui-build /ui/dist ./ui/dist
+COPY server/entrypoint.sh ./entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["uvicorn", "syncarr_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/entrypoint.sh"]
