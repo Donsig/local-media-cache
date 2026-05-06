@@ -54,17 +54,18 @@ class Aria2Client:
         url: str,
         filename: str,
         directory: Path,
-        sha256: str,
+        sha256: str | None,
         auth_token: str,
     ) -> str:
         """Add a download to aria2 and return the gid."""
-        options = {
+        options: dict[str, str] = {
             "header": f"Authorization: Bearer {auth_token}",
             "out": filename,
             "dir": str(directory),
-            "checksum": f"sha-256={sha256}",
             "auto-file-renaming": "false",
         }
+        if sha256:
+            options["checksum"] = f"sha-256={sha256}"
         downloads = self._api.add_uris([url], options=options)
         return str(downloads[0].gid)
 

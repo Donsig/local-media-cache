@@ -145,7 +145,8 @@ def _handle_ready(
     # No state record — crash-recovery check.
     if local_path.exists():
         actual_sha = _sha256_file(local_path)
-        if actual_sha == assignment.sha256:
+        # sha256=None means passthrough (no server-side hash); skip local verification.
+        if assignment.sha256 is None or actual_sha == assignment.sha256:
             log.info("agent.crash_recovery_confirm", asset_id=asset_id)
             ok = server.confirm_delivered(
                 asset_id,
@@ -154,7 +155,6 @@ def _handle_ready(
             )
             if ok:
                 return
-            # Server rejected (shouldn't happen here, but be safe)
             log.warning("agent.confirm_mismatch_on_recovery", asset_id=asset_id)
             _delete_if_exists(local_path)
             _delete_control_file(local_path)
@@ -170,7 +170,7 @@ def _handle_ready(
         url=assignment.download_url,
         filename=local_path.name,
         directory=asset_dir,
-        sha256=assignment.sha256 or "",
+        sha256=assignment.sha256,
         auth_token=server_token,
     )
     state.upsert(asset_id, gid, local_path, status="active")
@@ -189,9 +189,11 @@ def _confirm_or_requeue(
     server_token: str,
     log: structlog.stdlib.BoundLogger,
 ) -> None:
-    """Called when aria2 reports COMPLETE. Verify sha256 and confirm or re-queue."""
+    """Called when aria2 reports COMPLETE. Verify sha256 (if provided) and confirm or re-queue."""
     actual_sha = _sha256_file(local_path)
-    if actual_sha == assignment.sha256:
+    # sha256=None means passthrough; skip local sha256 verification.
+    sha256_ok = assignment.sha256 is None or actual_sha == assignment.sha256
+    if sha256_ok:
         ok = server.confirm_delivered(
             asset_id,
             actual_sha,
@@ -201,25 +203,22 @@ def _confirm_or_requeue(
             state.delete(asset_id)
             log.info("agent.confirm_delivered", asset_id=asset_id)
         else:
-            # Server-side mismatch (server has different sha256 than we computed)
             log.warning("agent.confirm_mismatch", asset_id=asset_id)
             _delete_if_exists(local_path)
             _delete_control_file(local_path)
             state.delete(asset_id)
-            # Server will flip back to ready on next poll; we'll re-queue then.
     else:
         log.warning("agent.sha256_mismatch_local", asset_id=asset_id)
         _delete_if_exists(local_path)
         _delete_control_file(local_path)
         state.delete(asset_id)
-        # Re-queue immediately.
         assert assignment.download_url is not None
         asset_dir.mkdir(parents=True, exist_ok=True)
         gid = aria2.add_download(
             url=assignment.download_url,
             filename=local_path.name,
             directory=asset_dir,
-            sha256=assignment.sha256 or "",
+            sha256=assignment.sha256,
             auth_token=server_token,
         )
         state.upsert(asset_id, gid, local_path, status="active")
