@@ -36,8 +36,6 @@ function Get-Container {
 }
 
 function Get-Aria2Active {
-
-function Get-Aria2Active {
     $payload = '{"jsonrpc":"2.0","id":"x","method":"aria2.tellActive"}'
     $raw = ssh satellite "curl -s --data '$payload' http://localhost:6800/jsonrpc"
     ($raw | ConvertFrom-Json).result
@@ -102,15 +100,17 @@ $sub     = Invoke-RestMethod "$SERVER/api/subscriptions" -Method POST -Headers $
 $SubId   = $sub.id
 Pass "T1.sub" "Subscription created id=$SubId"
 
-# Passthrough -> asset ready immediately (no transcode)
+# Passthrough -> stat+sha256 of source file; can take ~3 min for large files on NFS
 $readyAssignment = $null
-$ok = Wait-For -TimeoutSec 30 -IntervalSec 3 -Label "asset ready" -Cond {
-    $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH
-    $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
-    if ($hit) { $script:readyAssignment = $hit[0]; return $true }
+$ok = Wait-For -TimeoutSec 300 -IntervalSec 10 -Label "asset ready" -Cond {
+    try {
+        $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
+        $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
+        if ($hit) { $script:readyAssignment = $hit[0]; return $true }
+    } catch { }
     return $false
 }
-if (-not $ok) { Fail "T1.ready" "Asset never became ready within 30s" }
+if (-not $ok) { Fail "T1.ready" "Asset never became ready within 5 min" }
 $AssetId = $readyAssignment.asset_id
 Pass "T1.ready" "Asset ready, asset_id=$AssetId"
 
@@ -143,8 +143,10 @@ ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 
 $ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery confirmed" -Cond {
-    $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH
-    ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+    try {
+        $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
+        return ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+    } catch { return $false }
 }
 if (-not $ok) { Fail "T2.deliver" "Delivery not confirmed within 10 min" }
 
@@ -178,9 +180,11 @@ Info "Re-subscribed, new subscription id=$SubId"
 # Wait for new asset to be ready
 $readyAssignment = $null
 $ok = Wait-For -TimeoutSec 300 -IntervalSec 5 -Label "asset ready (re-subscribed)" -Cond {
-    $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH
-    $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
-    if ($hit) { $script:readyAssignment = $hit[0]; return $true }
+    try {
+        $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
+        $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
+        if ($hit) { $script:readyAssignment = $hit[0]; return $true }
+    } catch { }
     return $false
 }
 if (-not $ok) { Fail "T3.ready" "Asset never became ready after re-subscribe within 5 min" }
@@ -207,8 +211,10 @@ if ((ssh satellite "systemctl --user is-active aria2") -eq "active") { Pass "T3.
 else { Fail "T3.restart" "aria2 failed to restart" }
 
 $ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery after aria2 restart" -Cond {
-    $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH
-    ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+    try {
+        $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
+        return ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+    } catch { return $false }
 }
 if (-not $ok) { Fail "T3.deliver" "Delivery not confirmed within 10 min after aria2 restart" }
 Pass "T3.deliver" "Delivery confirmed -- aria2 session resume worked"

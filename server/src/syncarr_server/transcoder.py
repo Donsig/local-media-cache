@@ -93,9 +93,9 @@ class TranscodeWorker(_WorkerBase):
                 select(Asset).where(Asset.status == "transcoding").order_by(Asset.id),
             )
             assets = list(result.scalars())
+            cache_paths = [asset.cache_path for asset in assets]
 
             for asset in assets:
-                _delete_file_if_exists(asset.cache_path)
                 asset.status = "queued"
                 asset.cache_path = None
                 asset.size_bytes = None
@@ -104,6 +104,9 @@ class TranscodeWorker(_WorkerBase):
                 asset.ready_at = None
 
             await session.commit()
+
+        for path in cache_paths:
+            _delete_file_if_exists(path)
 
     async def run_once(self) -> None:
         loop = asyncio.get_running_loop()
@@ -164,29 +167,41 @@ class TranscodeWorker(_WorkerBase):
         if result.returncode == 0:
             size_bytes, sha256 = await loop.run_in_executor(None, _stat_and_hash, str(cache_path))
             async with self._session_factory() as session:
-                asset = await session.get(Asset, asset_id)
-                if asset is None:
+                updated = cast(
+                    CursorResult[Any],
+                    await session.execute(
+                        update(Asset)
+                        .where(Asset.id == asset_id, Asset.status == "transcoding")
+                        .values(
+                            status="ready",
+                            cache_path=str(cache_path),
+                            size_bytes=size_bytes,
+                            sha256=sha256,
+                            status_detail=None,
+                            ready_at=datetime.now(UTC),
+                        ),
+                    ),
+                )
+                if updated.rowcount != 1:
+                    await session.rollback()
                     return
-                asset.status = "ready"
-                asset.cache_path = str(cache_path)
-                asset.size_bytes = size_bytes
-                asset.sha256 = sha256
-                asset.status_detail = None
-                asset.ready_at = datetime.now(UTC)
                 await session.commit()
             return
 
         await loop.run_in_executor(None, _delete_file_if_exists, str(cache_path))
         async with self._session_factory() as session:
-            asset = await session.get(Asset, asset_id)
-            if asset is None:
-                return
-            asset.status = "failed"
-            asset.cache_path = None
-            asset.size_bytes = None
-            asset.sha256 = None
-            asset.ready_at = None
-            asset.status_detail = result.stderr[-2000:]
+            await session.execute(
+                update(Asset)
+                .where(Asset.id == asset_id, Asset.status == "transcoding")
+                .values(
+                    status="failed",
+                    cache_path=None,
+                    size_bytes=None,
+                    sha256=None,
+                    ready_at=None,
+                    status_detail=result.stderr[-2000:],
+                ),
+            )
             await session.commit()
 
 
@@ -229,20 +244,40 @@ class PassthroughWorker(_WorkerBase):
             source_path = asset.source_path
             await session.commit()
 
-        size_bytes, sha256 = await loop.run_in_executor(
-            None,
-            _stat_and_hash,
-            source_path,
-        )
+        try:
+            size_bytes, sha256 = await loop.run_in_executor(None, _stat_and_hash, source_path)
+        except Exception as exc:
+            structlog.get_logger().error("passthrough.hash_error", asset_id=asset_id, error=str(exc))
+            async with self._session_factory() as session:
+                await session.execute(
+                    update(Asset)
+                    .where(Asset.id == asset_id, Asset.status == "transcoding")
+                    .values(status="failed", status_detail=str(exc)[:2000]),
+                )
+                await session.commit()
+            return
 
         async with self._session_factory() as session:
-            asset = await session.get(Asset, asset_id)
-            if asset is None:
+            updated = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(Asset)
+                    .where(
+                        Asset.id == asset_id,
+                        Asset.status == "transcoding",
+                        Asset.source_path == source_path,
+                    )
+                    .values(
+                        status="ready",
+                        cache_path=None,
+                        size_bytes=size_bytes,
+                        sha256=sha256,
+                        status_detail=None,
+                        ready_at=datetime.now(UTC),
+                    ),
+                ),
+            )
+            if updated.rowcount != 1:
+                await session.rollback()
                 return
-            asset.status = "ready"
-            asset.cache_path = None
-            asset.size_bytes = size_bytes
-            asset.sha256 = sha256
-            asset.status_detail = None
-            asset.ready_at = datetime.now(UTC)
             await session.commit()
