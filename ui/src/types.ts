@@ -19,6 +19,21 @@ export type Profile = {
   created_at: string
 }
 
+export type Subscription = {
+  id: number
+  client_id: string
+  media_item_id: string
+  scope_type: string
+  scope_params: Record<string, unknown> | null
+  profile_id: string
+  created_at: string
+}
+
+export type ClientAssignment = {
+  media_item_id: string
+  state: 'ready' | 'queued' | 'evict'
+}
+
 export type MediaLibrary = {
   id: string
   title: string

@@ -1,4 +1,13 @@
-import type { Client, ClientCreateResponse, MediaItem, MediaItemDetails, MediaLibrary, Profile } from './types'
+import type {
+  Client,
+  ClientAssignment,
+  ClientCreateResponse,
+  MediaItem,
+  MediaItemDetails,
+  MediaLibrary,
+  Profile,
+  Subscription,
+} from './types'
 
 type RequestOptions = Omit<RequestInit, 'body'> & {
   body?: unknown
@@ -72,6 +81,36 @@ export async function deleteProfile(profileId: string): Promise<void> {
   await request<void>(`/api/profiles/${profileId}`, { method: 'DELETE' })
 }
 
+export async function getSubscriptions(clientId?: string): Promise<Subscription[]> {
+  const searchParams = new URLSearchParams()
+  if (clientId) {
+    searchParams.set('client_id', clientId)
+  }
+
+  const query = searchParams.toString()
+  const payload = await request<{ subscriptions: Subscription[] }>(
+    `/api/subscriptions${query ? `?${query}` : ''}`,
+  )
+  return payload.subscriptions
+}
+
+export async function createSubscription(input: {
+  client_id: string
+  media_item_id: string
+  scope_type: string
+  scope_params: Record<string, unknown> | null
+  profile_id: string
+}): Promise<Subscription> {
+  return request<Subscription>('/api/subscriptions', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function deleteSubscription(subscriptionId: number): Promise<void> {
+  await request<void>(`/api/subscriptions/${subscriptionId}`, { method: 'DELETE' })
+}
+
 export async function getLibraries(): Promise<MediaLibrary[]> {
   const payload = await request<{ libraries: MediaLibrary[] }>('/api/media/libraries')
   return payload.libraries
@@ -84,4 +123,18 @@ export async function getLibraryItems(libraryId: string): Promise<MediaItem[]> {
 
 export async function getMediaItem(itemId: string): Promise<MediaItemDetails> {
   return request<MediaItemDetails>(`/api/media/item/${itemId}`)
+}
+
+export async function getClientAssignments(
+  clientId: string,
+  mediaItemIds: string[],
+): Promise<ClientAssignment[]> {
+  if (mediaItemIds.length === 0) return []
+
+  const searchParams = new URLSearchParams({
+    media_item_ids: mediaItemIds.join(','),
+  })
+  return request<ClientAssignment[]>(
+    `/api/clients/${encodeURIComponent(clientId)}/assignments?${searchParams.toString()}`,
+  )
 }

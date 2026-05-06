@@ -10,11 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.auth import require_ui_auth
 from syncarr_server.db import get_session
-from syncarr_server.models import Asset, Client, Profile, Subscription
+from syncarr_server.models import Asset, Assignment, Client, Profile, Subscription
 from syncarr_server.providers.base import MediaProvider
 from syncarr_server.resolver import resolve_all_subscriptions
+from syncarr_server.routes.agent import _effective_state
 from syncarr_server.schemas import (
     AssetStatusSchema,
+    ClientAssignmentSchema,
     ClientCreateRequest,
     ClientCreateResponse,
     ClientSchema,
@@ -81,6 +83,12 @@ def _subscription_schema(subscription: Subscription) -> SubscriptionSchema:
         profile_id=subscription.profile_id,
         created_at=subscription.created_at,
     )
+
+
+def _stored_scope_type(scope_type: SubscriptionScopeType) -> SubscriptionScopeType:
+    if scope_type == "episode":
+        return "movie"
+    return scope_type
 
 
 async def _get_client(session: AsyncSession, client_id: str) -> Client:
@@ -198,6 +206,46 @@ async def delete_client(
     await session.commit()
     await resolve_all_subscriptions(provider=_provider(request), session=session)
     return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.get(
+    "/clients/{client_id}/assignments",
+    response_model=list[ClientAssignmentSchema],
+    dependencies=[Depends(require_ui_auth)],
+)
+async def list_client_assignments(
+    client_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    media_item_ids: str = "",
+) -> list[ClientAssignmentSchema]:
+    await _get_client(session, client_id)
+
+    ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
+    if not ids:
+        return []
+
+    result = await session.execute(
+        select(Assignment, Asset)
+        .join(Asset, Assignment.asset_id == Asset.id)
+        .where(
+            Assignment.client_id == client_id,
+            Asset.source_media_id.in_(ids),
+        )
+        .order_by(Assignment.created_at, Assignment.asset_id),
+    )
+
+    assignments: list[ClientAssignmentSchema] = []
+    for assignment, asset in result.all():
+        effective_state = _effective_state(assignment, asset)
+        if effective_state is None:
+            continue
+        assignments.append(
+            ClientAssignmentSchema(
+                media_item_id=asset.source_media_id,
+                state=effective_state,
+            )
+        )
+    return assignments
 
 
 @router.get(
@@ -333,7 +381,7 @@ async def create_subscription(
     subscription = Subscription(
         client_id=payload.client_id,
         media_item_id=payload.media_item_id,
-        scope_type=payload.scope_type,
+        scope_type=_stored_scope_type(payload.scope_type),
         scope_params=payload.scope_params,
         profile_id=payload.profile_id,
         created_at=_utc_now(),
@@ -359,6 +407,7 @@ async def update_subscription(
 
     media_item_id = payload.media_item_id or subscription.media_item_id
     scope_type = cast(SubscriptionScopeType, payload.scope_type or subscription.scope_type)
+    stored_scope_type = _stored_scope_type(scope_type)
     scope_params = (
         payload.scope_params
         if "scope_params" in payload.model_fields_set
@@ -369,7 +418,7 @@ async def update_subscription(
     await _get_profile(session, profile_id)
 
     subscription.media_item_id = media_item_id
-    subscription.scope_type = scope_type
+    subscription.scope_type = stored_scope_type
     subscription.scope_params = scope_params
     subscription.profile_id = profile_id
     await session.commit()

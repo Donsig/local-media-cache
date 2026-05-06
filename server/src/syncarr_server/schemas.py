@@ -48,14 +48,14 @@ class MediaPreviewResponse(BaseModel):
     estimated_transcoded_size_bytes: int | None = None
 
 
-SubscriptionScopeType = Literal["movie", "show:all", "show:seasons"]
+SubscriptionScopeType = Literal["movie", "episode", "show:all", "show:seasons"]
 
 
 def validate_subscription_scope(
     scope_type: SubscriptionScopeType,
     scope_params: dict[str, object] | None,
 ) -> None:
-    if scope_type in {"movie", "show:all"}:
+    if scope_type in {"movie", "episode", "show:all"}:
         if scope_params is not None:
             raise ValueError(f"scope_params must be null for {scope_type}")
         return
@@ -171,6 +171,11 @@ class AssetStatusSchema(Schema):
 AgentAssignmentState = Literal["queued", "ready", "evict"]
 AgentConfirmState = Literal["delivered", "evicted"]
 AgentConfirmMismatchReason = Literal["checksum_mismatch"]
+
+
+class ClientAssignmentSchema(Schema):
+    media_item_id: str
+    state: AgentAssignmentState
 
 
 class AgentAssignmentSchema(Schema):

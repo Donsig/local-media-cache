@@ -567,8 +567,69 @@ a {
   font-family: 'DM Mono', monospace;
 }
 
+.sync-pill:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .sync-pill:hover {
   background: var(--bg4);
+}
+
+.sync-pill--on {
+  background: var(--accent);
+  color: var(--bg0);
+}
+
+.sync-pill--pending {
+  background: var(--accent-dim);
+  color: var(--accent-text);
+}
+
+.sync-pill--partial {
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  opacity: 0.7;
+}
+
+.sync-pill--on:hover {
+  background: var(--accent);
+}
+
+.sync-pill--pending:hover,
+.sync-pill--partial:hover {
+  background: var(--accent-dim);
+}
+
+.sync-pill-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.sync-pill-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.sync-pill-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sync-pill-picker__error {
+  margin: 0;
 }
 
 @media (max-width: 960px) {

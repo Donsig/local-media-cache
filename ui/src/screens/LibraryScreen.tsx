@@ -1,15 +1,32 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getClients, getLibraries, getLibraryItems, getMediaItem } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import {
+  createSubscription,
+  deleteSubscription,
+  getClientAssignments,
+  getClients,
+  getLibraries,
+  getLibraryItems,
+  getMediaItem,
+  getProfiles,
+  getSubscriptions,
+} from '../api'
 import { getAssets } from '../api/media'
 import { Badge } from '../components/Badge'
 import { Btn } from '../components/Btn'
 import { IcoChevR, IcoFilm, IcoSearch, IcoTV } from '../components/icons'
 import { PillTabs } from '../components/PillTabs'
 import { SynInput } from '../components/SynInput'
-import type { MediaItem } from '../types'
+import type { Client, ClientAssignment, MediaItem, Profile } from '../types'
 
 type BadgeColor = 'ready' | 'transcoding' | 'queued' | 'failed' | 'default'
+type AssignmentState = ClientAssignment['state']
+type ClientAssignmentStateMap = Map<string, Map<string, AssignmentState>>
 
 function formatCount(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`
@@ -30,9 +47,340 @@ function statusToBadgeColor(status: string): BadgeColor {
   return 'default'
 }
 
+function episodePillClassName(state: AssignmentState | null): string {
+  if (state === 'ready') return 'sync-pill sync-pill--on'
+  if (state === 'queued' || state === 'evict') return 'sync-pill sync-pill--pending'
+  return 'sync-pill'
+}
+
+function assignmentStateFor(
+  assignmentStateByClient: ClientAssignmentStateMap,
+  clientId: string,
+  mediaItemId: string,
+): AssignmentState | null {
+  return assignmentStateByClient.get(clientId)?.get(mediaItemId) ?? null
+}
+
+function useClientAssignmentMap(
+  clients: Client[],
+  mediaItemIds: string[],
+  enabled: boolean,
+): ClientAssignmentStateMap {
+  const queries = useQueries({
+    queries: clients.map((client) => ({
+      queryKey: ['clientAssignments', client.id, mediaItemIds],
+      queryFn: () => getClientAssignments(client.id, mediaItemIds),
+      enabled: enabled && mediaItemIds.length > 0,
+      staleTime: 30_000,
+    })),
+  })
+
+  return useMemo(() => {
+    const map: ClientAssignmentStateMap = new Map()
+    for (const [index, client] of clients.entries()) {
+      const clientMap = new Map<string, AssignmentState>()
+      for (const assignment of queries[index]?.data ?? []) {
+        clientMap.set(assignment.media_item_id, assignment.state)
+      }
+      map.set(client.id, clientMap)
+    }
+    return map
+  }, [clients, queries])
+}
+
+function StaticClientPills({ clients }: { clients: Client[] }) {
+  return (
+    <>
+      {clients.map((client) => (
+        <span key={client.id} className="sync-pill">
+          {client.name}
+        </span>
+      ))}
+    </>
+  )
+}
+
+function SeasonAggregatePills({
+  clients,
+  episodeIds,
+  assignmentStateByClient,
+}: {
+  clients: Client[]
+  episodeIds: string[]
+  assignmentStateByClient: ClientAssignmentStateMap
+}) {
+  return (
+    <>
+      {clients.map((client) => {
+        const readyCount = episodeIds.filter(
+          (episodeId) => assignmentStateFor(assignmentStateByClient, client.id, episodeId) === 'ready',
+        ).length
+
+        let className = 'sync-pill'
+        let label = client.name
+        if (episodeIds.length > 0 && readyCount === episodeIds.length) {
+          className = 'sync-pill sync-pill--on'
+        } else if (readyCount > 0) {
+          className = 'sync-pill sync-pill--partial'
+          label = `${client.name}~`
+        }
+
+        return (
+          <span key={client.id} className={className}>
+            {label}
+          </span>
+        )
+      })}
+    </>
+  )
+}
+
+function EpisodeSyncPill({
+  client,
+  mediaItemId,
+  currentState,
+  profiles,
+}: {
+  client: Client
+  mediaItemId: string
+  currentState: AssignmentState | null
+  profiles: Profile[]
+}) {
+  const queryClient = useQueryClient()
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id ?? '')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selectedProfileId && profiles[0]?.id) {
+      setSelectedProfileId(profiles[0].id)
+    }
+  }, [profiles, selectedProfileId])
+
+  const closePopover = () => {
+    setPickerOpen(false)
+    setErrorMessage(null)
+  }
+
+  const invalidateAssignments = () =>
+    queryClient.invalidateQueries({ queryKey: ['clientAssignments', client.id] })
+
+  const createMutation = useMutation({
+    mutationFn: (profileId: string) =>
+      createSubscription({
+        client_id: client.id,
+        media_item_id: mediaItemId,
+        scope_type: 'episode',
+        scope_params: null,
+        profile_id: profileId,
+      }),
+    onSuccess: () => {
+      closePopover()
+      void invalidateAssignments()
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const subscriptions = await getSubscriptions(client.id)
+      const subscription = subscriptions.find((item) => item.media_item_id === mediaItemId)
+      if (!subscription) {
+        throw new Error(`Subscription for ${client.name} and ${mediaItemId} not found`)
+      }
+      await deleteSubscription(subscription.id)
+    },
+    onSuccess: () => {
+      setErrorMessage(null)
+      void invalidateAssignments()
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message)
+    },
+  })
+
+  const showForm = pickerOpen && currentState === null
+  const showPopover = showForm || errorMessage !== null
+  const isBusy = createMutation.isPending || deleteMutation.isPending
+
+  useEffect(() => {
+    if (!showPopover) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        anchorRef.current !== null &&
+        event.target instanceof Node &&
+        !anchorRef.current.contains(event.target)
+      ) {
+        closePopover()
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [showPopover])
+
+  return (
+    <div ref={anchorRef} className="sync-pill-anchor">
+      <button
+        type="button"
+        className={episodePillClassName(currentState)}
+        disabled={currentState === 'evict' || isBusy}
+        onClick={(event) => {
+          event.stopPropagation()
+          setErrorMessage(null)
+
+          if (currentState === 'evict') {
+            return
+          }
+
+          if (currentState === null) {
+            setPickerOpen((value) => !value)
+            return
+          }
+
+          deleteMutation.mutate()
+        }}
+      >
+        {client.name}
+      </button>
+
+      {showPopover ? (
+        <div className="sync-pill-picker" onClick={(event) => event.stopPropagation()}>
+          {showForm ? (
+            <>
+              <div className="form-field">
+                <label htmlFor={`profile-${client.id}-${mediaItemId}`}>Profile</label>
+                <select
+                  id={`profile-${client.id}-${mediaItemId}`}
+                  className="surface-input"
+                  value={selectedProfileId}
+                  onChange={(event) => setSelectedProfileId(event.target.value)}
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {profiles.length === 0 ? (
+                <div className="notice notice--error sync-pill-picker__error">
+                  No profiles available.
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          {errorMessage ? (
+            <div className="notice notice--error sync-pill-picker__error">{errorMessage}</div>
+          ) : null}
+
+          <div className="sync-pill-picker__actions">
+            {showForm ? (
+              <Btn
+                size="small"
+                variant="primary"
+                disabled={createMutation.isPending || !selectedProfileId || profiles.length === 0}
+                onClick={() => createMutation.mutate(selectedProfileId)}
+              >
+                Subscribe
+              </Btn>
+            ) : null}
+            <Btn size="small" onClick={closePopover}>
+              {showForm ? 'Cancel' : 'Close'}
+            </Btn>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function EpisodeSyncPills({
+  clients,
+  mediaItemId,
+  profiles,
+  assignmentStateByClient,
+}: {
+  clients: Client[]
+  mediaItemId: string
+  profiles: Profile[]
+  assignmentStateByClient: ClientAssignmentStateMap
+}) {
+  return (
+    <>
+      {clients.map((client) => (
+        <EpisodeSyncPill
+          key={client.id}
+          client={client}
+          mediaItemId={mediaItemId}
+          currentState={assignmentStateFor(assignmentStateByClient, client.id, mediaItemId)}
+          profiles={profiles}
+        />
+      ))}
+    </>
+  )
+}
+
+function EpisodeRows({
+  episodes,
+  clients,
+  profiles,
+  depth,
+  assetMap,
+  assignmentStateByClient,
+}: {
+  episodes: MediaItem[]
+  clients: Client[]
+  profiles: Profile[]
+  depth: number
+  assetMap: Map<string, { status: string }>
+  assignmentStateByClient: ClientAssignmentStateMap
+}) {
+  return (
+    <>
+      {episodes.map((episode) => {
+        const asset = assetMap.get(episode.id)
+        return (
+          <TreeRow
+            key={episode.id}
+            depth={depth}
+            title={`${buildEpisodeCode(episode)} · ${episode.title}`}
+            titleClassName="tree-row__title--episode mono"
+            badgeLabel={asset ? asset.status : '–'}
+            badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
+            pills={(
+              <EpisodeSyncPills
+                clients={clients}
+                mediaItemId={episode.id}
+                profiles={profiles}
+                assignmentStateByClient={assignmentStateByClient}
+              />
+            )}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 // ── Season row — fetches episodes lazily when expanded ────────────────────────
 
-function SeasonRow({ season, clients, depth }: { season: MediaItem; clients: string[]; depth: number }) {
+function SeasonRow({
+  season,
+  clients,
+  profiles,
+  depth,
+}: {
+  season: MediaItem
+  clients: Client[]
+  profiles: Profile[]
+  depth: number
+}) {
   const [isOpen, setIsOpen] = useState(false)
 
   const detailQuery = useQuery({
@@ -43,11 +391,12 @@ function SeasonRow({ season, clients, depth }: { season: MediaItem; clients: str
   })
 
   const episodes = detailQuery.data?.children ?? []
+  const episodeIds = useMemo(() => episodes.map((episode) => episode.id), [episodes])
 
   const assetsQuery = useQuery({
-    queryKey: ['assets', episodes.map((e) => e.id)],
-    queryFn: () => getAssets(episodes.map((e) => e.id)),
-    enabled: isOpen && episodes.length > 0,
+    queryKey: ['assets', episodeIds],
+    queryFn: () => getAssets(episodeIds),
+    enabled: isOpen && episodeIds.length > 0,
     staleTime: 30_000,
   })
 
@@ -56,6 +405,12 @@ function SeasonRow({ season, clients, depth }: { season: MediaItem; clients: str
     for (const asset of assetsQuery.data ?? []) map.set(asset.media_item_id, asset)
     return map
   }, [assetsQuery.data])
+
+  const assignmentStateByClient = useClientAssignmentMap(
+    clients,
+    episodeIds,
+    isOpen && episodeIds.length > 0,
+  )
 
   return (
     <>
@@ -66,32 +421,42 @@ function SeasonRow({ season, clients, depth }: { season: MediaItem; clients: str
         title={season.title}
         titleClassName="tree-row__title--item"
         meta={detailQuery.isLoading ? 'Loading…' : formatCount(episodes.length, 'episode')}
-        clients={clients}
-        onClick={() => setIsOpen((v) => !v)}
+        pills={(
+          <SeasonAggregatePills
+            clients={clients}
+            episodeIds={episodeIds}
+            assignmentStateByClient={assignmentStateByClient}
+          />
+        )}
+        onClick={() => setIsOpen((value) => !value)}
       />
-      {isOpen
-        ? episodes.map((episode) => {
-            const asset = assetMap.get(episode.id)
-            return (
-              <TreeRow
-                key={episode.id}
-                depth={depth + 1}
-                title={`${buildEpisodeCode(episode)} · ${episode.title}`}
-                titleClassName="tree-row__title--episode mono"
-                clients={clients}
-                badgeLabel={asset ? asset.status : '–'}
-                badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
-              />
-            )
-          })
-        : null}
+      {isOpen ? (
+        <EpisodeRows
+          episodes={episodes}
+          clients={clients}
+          profiles={profiles}
+          depth={depth + 1}
+          assetMap={assetMap}
+          assignmentStateByClient={assignmentStateByClient}
+        />
+      ) : null}
     </>
   )
 }
 
 // ── Show / movie row — fetches seasons lazily when expanded ───────────────────
 
-function ShowRow({ item, clients, depth }: { item: MediaItem; clients: string[]; depth: number }) {
+function ShowRow({
+  item,
+  clients,
+  profiles,
+  depth,
+}: {
+  item: MediaItem
+  clients: Client[]
+  profiles: Profile[]
+  depth: number
+}) {
   const [isOpen, setIsOpen] = useState(false)
 
   const detailQuery = useQuery({
@@ -102,14 +467,14 @@ function ShowRow({ item, clients, depth }: { item: MediaItem; clients: string[];
   })
 
   const children = detailQuery.data?.children ?? []
-  const seasons = children.filter((c) => c.type === 'season')
-  const episodes = children.filter((c) => c.type === 'episode')
+  const seasons = children.filter((child) => child.type === 'season')
+  const episodes = children.filter((child) => child.type === 'episode')
+  const episodeIds = useMemo(() => episodes.map((episode) => episode.id), [episodes])
 
-  // For flat episode lists (mini-series without seasons)
   const assetsQuery = useQuery({
-    queryKey: ['assets', episodes.map((e) => e.id)],
-    queryFn: () => getAssets(episodes.map((e) => e.id)),
-    enabled: isOpen && episodes.length > 0 && seasons.length === 0,
+    queryKey: ['assets', episodeIds],
+    queryFn: () => getAssets(episodeIds),
+    enabled: isOpen && episodeIds.length > 0 && seasons.length === 0,
     staleTime: 30_000,
   })
 
@@ -118,6 +483,12 @@ function ShowRow({ item, clients, depth }: { item: MediaItem; clients: string[];
     for (const asset of assetsQuery.data ?? []) map.set(asset.media_item_id, asset)
     return map
   }, [assetsQuery.data])
+
+  const assignmentStateByClient = useClientAssignmentMap(
+    clients,
+    episodeIds,
+    isOpen && episodeIds.length > 0 && seasons.length === 0,
+  )
 
   const metaParts = [
     item.year ? String(item.year) : null,
@@ -134,28 +505,30 @@ function ShowRow({ item, clients, depth }: { item: MediaItem; clients: string[];
         titleClassName="tree-row__title--item"
         icon={item.type === 'movie' ? <IcoFilm className="tree-icon" /> : <IcoTV className="tree-icon" />}
         meta={metaParts.join(' · ') || undefined}
-        clients={clients}
-        onClick={() => setIsOpen((v) => !v)}
+        pills={<StaticClientPills clients={clients} />}
+        onClick={() => setIsOpen((value) => !value)}
       />
       {isOpen && seasons.length > 0
-        ? seasons.map((season) => <SeasonRow key={season.id} season={season} clients={clients} depth={depth + 1} />)
+        ? seasons.map((season) => (
+            <SeasonRow
+              key={season.id}
+              season={season}
+              clients={clients}
+              profiles={profiles}
+              depth={depth + 1}
+            />
+          ))
         : null}
-      {isOpen && seasons.length === 0
-        ? episodes.map((episode) => {
-            const asset = assetMap.get(episode.id)
-            return (
-              <TreeRow
-                key={episode.id}
-                depth={depth + 1}
-                title={`${buildEpisodeCode(episode)} · ${episode.title}`}
-                titleClassName="tree-row__title--episode mono"
-                clients={clients}
-                badgeLabel={asset ? asset.status : '–'}
-                badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
-              />
-            )
-          })
-        : null}
+      {isOpen && seasons.length === 0 ? (
+        <EpisodeRows
+          episodes={episodes}
+          clients={clients}
+          profiles={profiles}
+          depth={depth + 1}
+          assetMap={assetMap}
+          assignmentStateByClient={assignmentStateByClient}
+        />
+      ) : null}
     </>
   )
 }
@@ -165,10 +538,12 @@ function ShowRow({ item, clients, depth }: { item: MediaItem; clients: string[];
 function LibrarySection({
   library,
   clients,
+  profiles,
   search,
 }: {
   library: { id: string; title: string; type: string }
-  clients: string[]
+  clients: Client[]
+  profiles: Profile[]
   search: string
 }) {
   const [isOpen, setIsOpen] = useState(false)
@@ -195,11 +570,19 @@ function LibrarySection({
         titleClassName="tree-row__title--library"
         icon={library.type === 'movie' ? <IcoFilm className="tree-icon" /> : <IcoTV className="tree-icon" />}
         meta={itemsQuery.isLoading ? 'Loading…' : formatCount(items.length, 'item')}
-        clients={clients.map((c) => c)}
-        onClick={() => setIsOpen((v) => !v)}
+        pills={<StaticClientPills clients={clients} />}
+        onClick={() => setIsOpen((value) => !value)}
       />
       {isOpen
-        ? items.map((item) => <ShowRow key={item.id} item={item} clients={clients} depth={1} />)
+        ? items.map((item) => (
+            <ShowRow
+              key={item.id}
+              item={item}
+              clients={clients}
+              profiles={profiles}
+              depth={1}
+            />
+          ))
         : null}
     </div>
   )
@@ -223,10 +606,18 @@ export function LibraryScreen() {
     staleTime: 60_000,
   })
 
+  const profilesQuery = useQuery({
+    queryKey: ['profiles'],
+    queryFn: getProfiles,
+    staleTime: 60_000,
+  })
+
   const libraries = librariesQuery.data ?? []
-  const clients = (clientsQuery.data ?? []).map((c) => c.name)
-  const isLoading = librariesQuery.isLoading || clientsQuery.isLoading
-  const error = librariesQuery.error ?? clientsQuery.error ?? null
+  const clients = clientsQuery.data ?? []
+  const profiles = profilesQuery.data ?? []
+  const isLoading =
+    librariesQuery.isLoading || clientsQuery.isLoading || profilesQuery.isLoading
+  const error = librariesQuery.error ?? clientsQuery.error ?? profilesQuery.error ?? null
 
   const clearVisible = Boolean(search.trim()) || activeFilter !== 'all'
 
@@ -262,7 +653,13 @@ export function LibraryScreen() {
               prefixIcon={<IcoSearch />}
             />
             {clearVisible ? (
-              <Btn size="small" onClick={() => { setSearch(''); setActiveFilter('all') }}>
+              <Btn
+                size="small"
+                onClick={() => {
+                  setSearch('')
+                  setActiveFilter('all')
+                }}
+              >
                 Clear
               </Btn>
             ) : null}
@@ -281,6 +678,7 @@ export function LibraryScreen() {
               key={library.id}
               library={library}
               clients={clients}
+              profiles={profiles}
               search={search}
             />
           ))}
@@ -299,7 +697,7 @@ type TreeRowProps = {
   meta?: string
   badgeLabel?: string
   badgeColor?: BadgeColor
-  clients: string[]
+  pills?: React.ReactNode
   expandable?: boolean
   open?: boolean
   icon?: React.ReactNode
@@ -307,8 +705,17 @@ type TreeRowProps = {
 }
 
 function TreeRow({
-  depth, title, titleClassName = '', meta, badgeLabel, badgeColor = 'default',
-  clients, expandable = false, open = false, icon, onClick,
+  depth,
+  title,
+  titleClassName = '',
+  meta,
+  badgeLabel,
+  badgeColor = 'default',
+  pills,
+  expandable = false,
+  open = false,
+  icon,
+  onClick,
 }: TreeRowProps) {
   return (
     <div
@@ -336,11 +743,7 @@ function TreeRow({
       <div className="tree-row__right">
         {meta ? <span className="tree-meta">{meta}</span> : null}
         {badgeLabel ? <Badge color={badgeColor} label={badgeLabel} /> : null}
-        {clients.map((client) => (
-          <button key={client} type="button" className="sync-pill" onClick={(e) => e.stopPropagation()}>
-            {client}
-          </button>
-        ))}
+        {pills}
       </div>
     </div>
   )
