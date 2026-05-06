@@ -10,27 +10,27 @@ const colorMap: Record<BadgeColor, { background: string; border: string; text: s
   ready: {
     background: 'var(--state-ready)',
     border: 'var(--state-ready)',
-    text: 'var(--bg0)',
+    text: 'var(--state-ready)',
   },
   transcoding: {
     background: 'var(--state-transcoding)',
     border: 'var(--state-transcoding)',
-    text: 'var(--bg0)',
+    text: 'var(--state-transcoding)',
   },
   queued: {
     background: 'var(--state-queued)',
     border: 'var(--state-queued)',
-    text: 'var(--bg0)',
+    text: 'var(--state-queued)',
   },
   failed: {
     background: 'var(--state-failed)',
     border: 'var(--state-failed)',
-    text: 'var(--bg0)',
+    text: 'var(--state-failed)',
   },
   downloading: {
     background: 'var(--state-downloading)',
     border: 'var(--state-downloading)',
-    text: 'var(--bg0)',
+    text: 'var(--state-downloading)',
   },
   default: {
     background: 'var(--bg4)',

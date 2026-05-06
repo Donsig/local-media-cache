@@ -443,7 +443,51 @@ function SeasonRow({
   )
 }
 
-// ── Show / movie row — fetches seasons lazily when expanded ───────────────────
+// ── Movie row — non-expandable leaf with interactive sync pills ───────────────
+
+function MovieRow({
+  item,
+  clients,
+  profiles,
+  depth,
+}: {
+  item: MediaItem
+  clients: Client[]
+  profiles: Profile[]
+  depth: number
+}) {
+  const assignmentStateByClient = useClientAssignmentMap(clients, [item.id], true)
+
+  const assetsQuery = useQuery({
+    queryKey: ['assets', [item.id]],
+    queryFn: () => getAssets([item.id]),
+    staleTime: 30_000,
+  })
+
+  const asset = assetsQuery.data?.[0]
+
+  return (
+    <TreeRow
+      depth={depth}
+      title={item.title}
+      titleClassName="tree-row__title--item"
+      icon={<IcoFilm className="tree-icon" />}
+      meta={item.year ? String(item.year) : undefined}
+      badgeLabel={asset ? asset.status : undefined}
+      badgeColor={asset ? statusToBadgeColor(asset.status) : 'default'}
+      pills={(
+        <EpisodeSyncPills
+          clients={clients}
+          mediaItemId={item.id}
+          profiles={profiles}
+          assignmentStateByClient={assignmentStateByClient}
+        />
+      )}
+    />
+  )
+}
+
+// ── Show row — fetches seasons lazily when expanded ───────────────────────────
 
 function ShowRow({
   item,
@@ -502,7 +546,7 @@ function ShowRow({
         open={isOpen}
         title={item.title}
         titleClassName="tree-row__title--item"
-        icon={item.type === 'movie' ? <IcoFilm className="tree-icon" /> : <IcoTV className="tree-icon" />}
+        icon={<IcoTV className="tree-icon" />}
         meta={metaParts.join(' · ') || undefined}
         pills={<StaticClientPills clients={clients} />}
         onClick={() => setIsOpen((value) => !value)}
@@ -573,15 +617,25 @@ function LibrarySection({
         onClick={() => setIsOpen((value) => !value)}
       />
       {isOpen
-        ? items.map((item) => (
-            <ShowRow
-              key={item.id}
-              item={item}
-              clients={clients}
-              profiles={profiles}
-              depth={1}
-            />
-          ))
+        ? items.map((item) =>
+            item.type === 'movie' ? (
+              <MovieRow
+                key={item.id}
+                item={item}
+                clients={clients}
+                profiles={profiles}
+                depth={1}
+              />
+            ) : (
+              <ShowRow
+                key={item.id}
+                item={item}
+                clients={clients}
+                profiles={profiles}
+                depth={1}
+              />
+            ),
+          )
         : null}
     </div>
   )

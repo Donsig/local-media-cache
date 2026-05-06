@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getAllAssets } from '../api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { deleteAsset, getAllAssets } from '../api'
 import { Badge } from '../components/Badge'
+import { Btn } from '../components/Btn'
 import { PillTabs } from '../components/PillTabs'
 import type { AssetRow } from '../types'
 
@@ -45,7 +46,11 @@ function formatRelativeTime(isoString: string): string {
   return `${Math.floor(diffHours / 24)}d ago`
 }
 
-function AssetRowItem({ asset }: { asset: AssetRow }) {
+const ACTIVE_STATUSES = new Set(['transcoding', 'downloading', 'queued'])
+
+function AssetRowItem({ asset, onDelete }: { asset: AssetRow; onDelete: () => void }) {
+  const isActive = ACTIVE_STATUSES.has(asset.status)
+
   return (
     <div className="queue-row">
       <div className="queue-row__status">
@@ -53,6 +58,13 @@ function AssetRowItem({ asset }: { asset: AssetRow }) {
       </div>
       <div className="queue-row__main">
         <span className="queue-row__filename">{asset.filename}</span>
+        {isActive ? (
+          <div className="queue-row__progress">
+            <div className="progress__track" aria-hidden="true">
+              <div className="progress__fill progress__fill--indeterminate" />
+            </div>
+          </div>
+        ) : null}
         {asset.status === 'failed' && asset.status_detail ? (
           <span className="queue-row__detail">{asset.status_detail}</span>
         ) : null}
@@ -63,6 +75,7 @@ function AssetRowItem({ asset }: { asset: AssetRow }) {
         {asset.ready_at ? (
           <span className="queue-row__ready">ready {formatRelativeTime(asset.ready_at)}</span>
         ) : null}
+        <Btn size="small" variant="danger" onClick={onDelete}>Remove</Btn>
       </div>
     </div>
   )
@@ -78,12 +91,18 @@ const FILTER_TABS = [
 
 export function QueueScreen() {
   const [activeFilter, setActiveFilter] = useState('all')
+  const queryClient = useQueryClient()
 
   const assetsQuery = useQuery({
     queryKey: ['assets', 'all'],
     queryFn: getAllAssets,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteAsset,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
   })
 
   const assets = assetsQuery.data ?? []
@@ -138,7 +157,11 @@ export function QueueScreen() {
         ) : (
           <div className="queue-list">
             {filtered.map((asset) => (
-              <AssetRowItem key={asset.asset_id} asset={asset} />
+              <AssetRowItem
+                key={asset.asset_id}
+                asset={asset}
+                onDelete={() => deleteMutation.mutate(asset.asset_id)}
+              />
             ))}
           </div>
         )}

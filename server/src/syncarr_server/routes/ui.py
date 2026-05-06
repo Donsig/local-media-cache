@@ -444,6 +444,35 @@ async def delete_subscription(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.delete(
+    "/assets/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def delete_asset(
+    asset_id: int,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    subscriptions = list(
+        (
+            await session.execute(
+                select(Subscription).where(Subscription.media_item_id == asset.source_media_id)
+            )
+        ).scalars()
+    )
+    for subscription in subscriptions:
+        await session.delete(subscription)
+    await session.commit()
+
+    await resolve_all_subscriptions(provider=_provider(request), session=session)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/assets",
     response_model=list[AssetStatusSchema],

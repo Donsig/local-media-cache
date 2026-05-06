@@ -321,6 +321,22 @@ a {
   transition: width 0.2s ease;
 }
 
+.progress__fill--indeterminate {
+  width: 40% !important;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 50%,
+    transparent 100%
+  );
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-150%); }
+  100% { transform: translateX(400%); }
+}
+
 .progress__label {
   font-size: 11px;
   color: var(--text2);
@@ -339,7 +355,7 @@ a {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: transparent;
-  color: var(--text2);
+  color: var(--text1);
   cursor: pointer;
   font-size: 12px;
 }
@@ -563,7 +579,7 @@ a {
   border: 1px solid var(--border2);
   border-radius: 4px;
   background: transparent;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 11px;
   font-family: 'DM Mono', monospace;
   max-width: 120px;
@@ -669,6 +685,11 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.queue-row__progress {
+  margin-top: 4px;
+  overflow: hidden;
 }
 
 .queue-row__detail {

@@ -130,6 +130,10 @@ export async function getAllAssets(): Promise<AssetRow[]> {
   return request<AssetRow[]>('/api/assets')
 }
 
+export async function deleteAsset(assetId: number): Promise<void> {
+  await request<void>(`/api/assets/${assetId}`, { method: 'DELETE' })
+}
+
 export async function getClientAssignments(
   clientId: string,
   mediaItemIds: string[],
