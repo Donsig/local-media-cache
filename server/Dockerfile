@@ -15,7 +15,7 @@ COPY server/alembic.ini ./alembic.ini
 COPY server/alembic ./alembic
 COPY server/src ./src
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e .
 
 COPY --from=ui-build /ui/dist ./ui/dist
 COPY server/entrypoint.sh ./entrypoint.sh
