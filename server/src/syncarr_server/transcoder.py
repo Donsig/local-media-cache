@@ -226,11 +226,19 @@ class PassthroughWorker(_WorkerBase):
                 await session.rollback()
                 return
 
-            size_bytes, sha256 = await loop.run_in_executor(
-                None,
-                _stat_and_hash,
-                asset.source_path,
-            )
+            source_path = asset.source_path
+            await session.commit()
+
+        size_bytes, sha256 = await loop.run_in_executor(
+            None,
+            _stat_and_hash,
+            source_path,
+        )
+
+        async with self._session_factory() as session:
+            asset = await session.get(Asset, asset_id)
+            if asset is None:
+                return
             asset.status = "ready"
             asset.cache_path = None
             asset.size_bytes = size_bytes
