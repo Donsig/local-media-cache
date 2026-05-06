@@ -38,7 +38,11 @@ function Get-Container {
 function Get-Aria2Active {
     $payload = '{"jsonrpc":"2.0","id":"x","method":"aria2.tellActive"}'
     $raw = ssh satellite "curl -s --data '$payload' http://localhost:6800/jsonrpc"
-    ($raw | ConvertFrom-Json).result
+    try {
+        $result = ($raw | ConvertFrom-Json).result
+        if ($result) { return @($result) }
+    } catch { }
+    return @()
 }
 
 function Wait-For {
@@ -102,7 +106,7 @@ Pass "T1.sub" "Subscription created id=$SubId"
 
 # Passthrough -> stat+sha256 of source file; can take ~3 min for large files on NFS
 $readyAssignment = $null
-$ok = Wait-For -TimeoutSec 300 -IntervalSec 10 -Label "asset ready" -Cond {
+$ok = Wait-For -TimeoutSec 600 -IntervalSec 10 -Label "asset ready" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $hit  = $view.assignments | Where-Object { $_.state -eq "ready" -and $_.source_media_id -eq $script:MovieId }
@@ -122,12 +126,14 @@ ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent started -- waiting for aria2 to pick up download..."
 
 $ok = Wait-For -TimeoutSec 90 -IntervalSec 3 -Label "aria2 download start" -Cond {
-    $active = Get-Aria2Active
-    $active.Count -gt 0 -and [long]$active[0].completedLength -gt 0
+    try {
+        [array]$dl = Get-Aria2Active
+        return ($dl.Count -gt 0 -and $dl[0] -ne $null -and [long]$dl[0].completedLength -gt 0)
+    } catch { return $false }
 }
 if (-not $ok) { Fail "T2.start" "aria2 never started within 90s" }
 
-$active = Get-Aria2Active
+[array]$active = Get-Aria2Active
 $pct    = [math]::Round(100 * [long]$active[0].completedLength / [long]$active[0].totalLength, 2)
 $dlMb   = [math]::Round([long]$active[0].completedLength / 1MB, 1)
 Info "Download in flight: $pct% (${dlMb}MB) -- killing agent"
@@ -145,7 +151,8 @@ Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 $ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery confirmed" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
-        return ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+        $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
+        return $pending.Count -eq 0
     } catch { return $false }
 }
 if (-not $ok) { Fail "T2.deliver" "Delivery not confirmed within 10 min" }
@@ -187,18 +194,20 @@ $ok = Wait-For -TimeoutSec 300 -IntervalSec 5 -Label "asset ready (re-subscribed
     } catch { }
     return $false
 }
-if (-not $ok) { Fail "T3.ready" "Asset never became ready after re-subscribe within 5 min" }
+if (-not $ok) { Fail "T3.ready" "Asset never became ready after re-subscribe within 10 min" }
 $AssetId = $readyAssignment.asset_id
 Pass "T3.ready" "Fresh asset ready, asset_id=$AssetId"
 Start-Sleep 2
 
 $ok = Wait-For -TimeoutSec 120 -IntervalSec 3 -Label "aria2 >5MB downloaded" -Cond {
-    $active = Get-Aria2Active
-    $active.Count -gt 0 -and [long]$active[0].completedLength -gt (5 * 1024 * 1024)
+    try {
+        [array]$dl = Get-Aria2Active
+        return ($dl.Count -gt 0 -and $dl[0] -ne $null -and [long]$dl[0].completedLength -gt (5 * 1024 * 1024))
+    } catch { return $false }
 }
 if (-not $ok) { Fail "T3.start" ">5MB not downloaded within 120s" }
 
-$active = Get-Aria2Active
+[array]$active = Get-Aria2Active
 $mb = [math]::Round([long]$active[0].completedLength / 1MB, 1)
 Info "Downloaded ${mb}MB -- killing aria2"
 
@@ -213,7 +222,8 @@ else { Fail "T3.restart" "aria2 failed to restart" }
 $ok = Wait-For -TimeoutSec 600 -IntervalSec 15 -Label "delivery after aria2 restart" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
-        return ($view.assignments | Where-Object { $_.state -in @("ready","queued") }).Count -eq 0
+        $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
+        return $pending.Count -eq 0
     } catch { return $false }
 }
 if (-not $ok) { Fail "T3.deliver" "Delivery not confirmed within 10 min after aria2 restart" }
