@@ -244,10 +244,14 @@ class PassthroughWorker(_WorkerBase):
             source_path = asset.source_path
             await session.commit()
 
+        # Passthrough = direct transfer: no transcode, no hash. Just stat the file for size.
+        # sha256 is intentionally None — the confirm handler skips verification when None.
         try:
-            size_bytes, sha256 = await loop.run_in_executor(None, _stat_and_hash, source_path)
+            size_bytes = await loop.run_in_executor(
+                None, lambda: Path(source_path).stat().st_size
+            )
         except Exception as exc:
-            structlog.get_logger().error("passthrough.hash_error", asset_id=asset_id, error=str(exc))
+            structlog.get_logger().error("passthrough.stat_error", asset_id=asset_id, error=str(exc))
             async with self._session_factory() as session:
                 await session.execute(
                     update(Asset)
@@ -271,7 +275,7 @@ class PassthroughWorker(_WorkerBase):
                         status="ready",
                         cache_path=None,
                         size_bytes=size_bytes,
-                        sha256=sha256,
+                        sha256=None,
                         status_detail=None,
                         ready_at=datetime.now(UTC),
                     ),
