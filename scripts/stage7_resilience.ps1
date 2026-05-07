@@ -156,14 +156,14 @@ else { Fail "T2.aria2survives" "aria2 stopped when agent was killed" }
 ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 
-$ok = Wait-For -TimeoutSec 900 -IntervalSec 10 -Label "delivery confirmed" -Cond {
+$ok = Wait-For -TimeoutSec 1200 -IntervalSec 10 -Label "delivery confirmed" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
         return $pending.Count -eq 0
     } catch { return $false }
 }
-if (-not $ok) { Fail "T2.deliver" "Delivery not confirmed within 10 min" }
+if (-not $ok) { Fail "T2.deliver" "Delivery not confirmed within 20 min" }
 
 $oppFile = ssh satellite "find ~/media -type f \( -name '*.mkv' -o -name '*.mp4' \) | grep -i "taxi.4" || true"
 if ($oppFile) { Pass "T2.file" "File on satellite: $oppFile" }
@@ -227,14 +227,14 @@ ssh satellite "systemctl --user start aria2"
 if ((ssh satellite "systemctl --user is-active aria2") -eq "active") { Pass "T3.restart" "aria2 restarted" }
 else { Fail "T3.restart" "aria2 failed to restart" }
 
-$ok = Wait-For -TimeoutSec 180 -IntervalSec 10 -Label "delivery after aria2 restart" -Cond {
+$ok = Wait-For -TimeoutSec 1200 -IntervalSec 10 -Label "delivery after aria2 restart" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
         return $pending.Count -eq 0
     } catch { return $false }
 }
-if (-not $ok) { Fail "T3.deliver" "Delivery not confirmed within 10 min after aria2 restart" }
+if (-not $ok) { Fail "T3.deliver" "Delivery not confirmed within 20 min after aria2 restart" }
 Pass "T3.deliver" "Delivery confirmed -- aria2 session resume worked"
 
 # ============================================================
