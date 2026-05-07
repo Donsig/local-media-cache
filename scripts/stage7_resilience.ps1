@@ -122,6 +122,8 @@ Pass "T1.ready" "Asset ready, asset_id=$AssetId"
 Step "T2: Agent kill mid-download"
 # ============================================================
 
+ssh satellite "rm -f ~/media/.syncarr/state.db"
+Info "state.db wiped before T2 agent start (clean GID slate)"
 ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent started -- waiting for aria2 to pick up download..."
 
