@@ -99,40 +99,6 @@ function StaticClientPills({ clients }: { clients: Client[] }) {
   )
 }
 
-function SeasonAggregatePills({
-  clients,
-  episodeIds,
-  assignmentStateByClient,
-}: {
-  clients: Client[]
-  episodeIds: string[]
-  assignmentStateByClient: ClientAssignmentStateMap
-}) {
-  return (
-    <>
-      {clients.map((client) => {
-        const readyCount = episodeIds.filter(
-          (episodeId) => assignmentStateFor(assignmentStateByClient, client.id, episodeId) === 'ready',
-        ).length
-
-        let className = 'sync-pill'
-        let label = client.name
-        if (episodeIds.length > 0 && readyCount === episodeIds.length) {
-          className = 'sync-pill sync-pill--on'
-        } else if (readyCount > 0) {
-          className = 'sync-pill sync-pill--partial'
-          label = `${client.name}~`
-        }
-
-        return (
-          <span key={client.id} className={className}>
-            {label}
-          </span>
-        )
-      })}
-    </>
-  )
-}
 
 function EpisodeSyncPill({
   client,
@@ -325,6 +291,214 @@ function EpisodeSyncPills({
   )
 }
 
+// ── Bulk sync pill — season or show level subscriptions ──────────────────────
+
+function BulkSyncPill({
+  client,
+  showId,
+  scopeType,
+  scopeParams,
+  profiles,
+}: {
+  client: Client
+  showId: string
+  scopeType: 'show:all' | 'show:seasons'
+  scopeParams: Record<string, unknown> | null
+  profiles: Profile[]
+}) {
+  const queryClient = useQueryClient()
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id ?? '')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selectedProfileId && profiles[0]?.id) {
+      setSelectedProfileId(profiles[0].id)
+    }
+  }, [profiles, selectedProfileId])
+
+  const subsQuery = useQuery({
+    queryKey: ['subscriptions', client.id],
+    queryFn: () => getSubscriptions(client.id),
+    staleTime: 30_000,
+  })
+
+  const matchingSub = useMemo(() => {
+    return subsQuery.data?.find((sub) => {
+      if (sub.media_item_id !== showId || sub.scope_type !== scopeType) return false
+      if (scopeType === 'show:seasons') {
+        const subSeasons = sub.scope_params?.seasons as number[] | undefined
+        const wantedSeasons = (scopeParams?.seasons ?? []) as number[]
+        return wantedSeasons.every((s) => subSeasons?.includes(s))
+      }
+      return true
+    })
+  }, [subsQuery.data, showId, scopeType, scopeParams])
+
+  const isSubscribed = Boolean(matchingSub)
+
+  const closePopover = () => {
+    setPickerOpen(false)
+    setErrorMessage(null)
+  }
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['subscriptions', client.id] })
+    void queryClient.invalidateQueries({ queryKey: ['clientAssignments', client.id] })
+  }
+
+  const createMutation = useMutation({
+    mutationFn: (profileId: string) =>
+      createSubscription({
+        client_id: client.id,
+        media_item_id: showId,
+        scope_type: scopeType,
+        scope_params: scopeParams,
+        profile_id: profileId,
+      }),
+    onSuccess: () => {
+      closePopover()
+      invalidate()
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!matchingSub) throw new Error('Subscription not found')
+      await deleteSubscription(matchingSub.id)
+    },
+    onSuccess: () => {
+      setErrorMessage(null)
+      invalidate()
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message)
+    },
+  })
+
+  const showForm = pickerOpen && !isSubscribed
+  const showPopover = showForm || errorMessage !== null
+  const isBusy = createMutation.isPending || deleteMutation.isPending || subsQuery.isLoading
+
+  useEffect(() => {
+    if (!showPopover) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        anchorRef.current !== null &&
+        event.target instanceof Node &&
+        !anchorRef.current.contains(event.target)
+      ) {
+        closePopover()
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [showPopover])
+
+  return (
+    <div ref={anchorRef} className="sync-pill-anchor">
+      <button
+        type="button"
+        className={isSubscribed ? 'sync-pill sync-pill--on' : 'sync-pill'}
+        disabled={isBusy}
+        onClick={(event) => {
+          event.stopPropagation()
+          setErrorMessage(null)
+          if (isSubscribed) {
+            deleteMutation.mutate()
+          } else {
+            setPickerOpen((v) => !v)
+          }
+        }}
+      >
+        {client.name}
+      </button>
+
+      {showPopover ? (
+        <div className="sync-pill-picker" onClick={(event) => event.stopPropagation()}>
+          {showForm ? (
+            <>
+              <div className="form-field">
+                <label htmlFor={`profile-bulk-${client.id}-${showId}-${scopeType}`}>Profile</label>
+                <select
+                  id={`profile-bulk-${client.id}-${showId}-${scopeType}`}
+                  className="surface-input"
+                  value={selectedProfileId}
+                  onChange={(event) => setSelectedProfileId(event.target.value)}
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {profiles.length === 0 ? (
+                <div className="notice notice--error sync-pill-picker__error">
+                  No profiles available.
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          {errorMessage ? (
+            <div className="notice notice--error sync-pill-picker__error">{errorMessage}</div>
+          ) : null}
+
+          <div className="sync-pill-picker__actions">
+            {showForm ? (
+              <Btn
+                size="small"
+                variant="primary"
+                disabled={createMutation.isPending || !selectedProfileId || profiles.length === 0}
+                onClick={() => createMutation.mutate(selectedProfileId)}
+              >
+                Subscribe
+              </Btn>
+            ) : null}
+            <Btn size="small" onClick={closePopover}>
+              {showForm ? 'Cancel' : 'Close'}
+            </Btn>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function BulkSyncPills({
+  clients,
+  showId,
+  scopeType,
+  scopeParams,
+  profiles,
+}: {
+  clients: Client[]
+  showId: string
+  scopeType: 'show:all' | 'show:seasons'
+  scopeParams: Record<string, unknown> | null
+  profiles: Profile[]
+}) {
+  return (
+    <>
+      {clients.map((client) => (
+        <BulkSyncPill
+          key={client.id}
+          client={client}
+          showId={showId}
+          scopeType={scopeType}
+          scopeParams={scopeParams}
+          profiles={profiles}
+        />
+      ))}
+    </>
+  )
+}
+
 function EpisodeRows({
   episodes,
   clients,
@@ -371,11 +545,13 @@ function EpisodeRows({
 
 function SeasonRow({
   season,
+  showId,
   clients,
   profiles,
   depth,
 }: {
   season: MediaItem
+  showId: string
   clients: Client[]
   profiles: Profile[]
   depth: number
@@ -420,13 +596,15 @@ function SeasonRow({
         title={season.title}
         titleClassName="tree-row__title--item"
         meta={detailQuery.isLoading ? 'Loading…' : formatCount(episodes.length, 'episode')}
-        pills={(
-          <SeasonAggregatePills
+        pills={season.season_number != null ? (
+          <BulkSyncPills
             clients={clients}
-            episodeIds={episodeIds}
-            assignmentStateByClient={assignmentStateByClient}
+            showId={showId}
+            scopeType="show:seasons"
+            scopeParams={{ seasons: [season.season_number] }}
+            profiles={profiles}
           />
-        )}
+        ) : null}
         onClick={() => setIsOpen((value) => !value)}
       />
       {isOpen ? (
@@ -548,7 +726,15 @@ function ShowRow({
         titleClassName="tree-row__title--item"
         icon={<IcoTV className="tree-icon" />}
         meta={metaParts.join(' · ') || undefined}
-        pills={<StaticClientPills clients={clients} />}
+        pills={(
+          <BulkSyncPills
+            clients={clients}
+            showId={item.id}
+            scopeType="show:all"
+            scopeParams={null}
+            profiles={profiles}
+          />
+        )}
         onClick={() => setIsOpen((value) => !value)}
       />
       {isOpen && seasons.length > 0
@@ -556,6 +742,7 @@ function ShowRow({
             <SeasonRow
               key={season.id}
               season={season}
+              showId={item.id}
               clients={clients}
               profiles={profiles}
               depth={depth + 1}
