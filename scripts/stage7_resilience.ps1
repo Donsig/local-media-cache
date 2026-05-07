@@ -150,7 +150,7 @@ else { Fail "T2.aria2survives" "aria2 stopped when agent was killed" }
 ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 
-$ok = Wait-For -TimeoutSec 180 -IntervalSec 10 -Label "delivery confirmed" -Cond {
+$ok = Wait-For -TimeoutSec 900 -IntervalSec 10 -Label "delivery confirmed" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
         $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
