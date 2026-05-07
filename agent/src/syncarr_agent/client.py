@@ -38,6 +38,12 @@ class AssignmentsResponse:
     )
 
 
+@dataclass
+class ReconcileResponse:
+    orphans_to_delete: list[int]
+    missing_to_redownload: list[int]
+
+
 class ServerClient:
     def __init__(
         self,
@@ -124,3 +130,12 @@ class ServerClient:
         if resp.status_code == 404:
             return
         resp.raise_for_status()
+
+    def reconcile(self, assets_present: list[int]) -> ReconcileResponse:
+        resp = self._client.post("/reconcile", json={"assets_present": assets_present})
+        resp.raise_for_status()
+        data = resp.json()
+        return ReconcileResponse(
+            orphans_to_delete=data.get("orphans_to_delete", []),
+            missing_to_redownload=data.get("missing_to_redownload", []),
+        )

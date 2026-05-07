@@ -1,10 +1,10 @@
-"""Local SQLite state: tracks asset_id → aria2 gid + local path + status."""
+"""Local SQLite state: tracks asset_id -> aria2 gid + local path + status."""
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -13,7 +13,7 @@ class DownloadRecord:
     asset_id: int
     gid: str
     local_path: Path
-    status: str  # 'active' | 'failed'
+    status: str  # 'active' | 'failed' | 'delivered'
     started_at: str  # ISO 8601
 
 
@@ -46,7 +46,11 @@ class StateDB:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT asset_id, gid, local_path, status, started_at FROM downloads WHERE asset_id = ?",
+                """
+                SELECT asset_id, gid, local_path, status, started_at
+                FROM downloads
+                WHERE asset_id = ?
+                """,
                 (asset_id,),
             ).fetchone()
             if row is None:
@@ -68,7 +72,7 @@ class StateDB:
         local_path: Path,
         status: str = "active",
     ) -> None:
-        started_at = datetime.now(tz=timezone.utc).isoformat()
+        started_at = datetime.now(tz=UTC).isoformat()
         conn = self._connect()
         try:
             conn.execute(
@@ -98,6 +102,17 @@ class StateDB:
         finally:
             conn.close()
 
+    def set_delivered(self, asset_id: int) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE downloads SET status = 'delivered' WHERE asset_id = ?",
+                (asset_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def delete(self, asset_id: int) -> None:
         conn = self._connect()
         try:
@@ -111,6 +126,29 @@ class StateDB:
         try:
             rows = conn.execute(
                 "SELECT asset_id, gid, local_path, status, started_at FROM downloads"
+            ).fetchall()
+            return [
+                DownloadRecord(
+                    asset_id=int(row["asset_id"]),
+                    gid=row["gid"],
+                    local_path=Path(row["local_path"]),
+                    status=row["status"],
+                    started_at=row["started_at"],
+                )
+                for row in rows
+            ]
+        finally:
+            conn.close()
+
+    def all_delivered(self) -> list[DownloadRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT asset_id, gid, local_path, status, started_at
+                FROM downloads
+                WHERE status = 'delivered'
+                """
             ).fetchall()
             return [
                 DownloadRecord(

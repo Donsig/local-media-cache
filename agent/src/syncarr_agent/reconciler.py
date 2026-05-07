@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,10 +27,8 @@ def _sha256_file(path: Path) -> str:
 
 
 def _delete_if_exists(path: Path) -> None:
-    try:
+    with suppress(FileNotFoundError):
         path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _delete_control_file(local_path: Path) -> None:
@@ -93,6 +92,37 @@ def reconcile(
             )
 
 
+def run_reconcile(
+    state: StateDB,
+    server: ServerClient,
+    library_root: Path,
+    log: structlog.stdlib.BoundLogger,
+) -> None:
+    delivered = state.all_delivered()
+    assets_present = [record.asset_id for record in delivered if record.local_path.is_file()]
+    result = server.reconcile(assets_present)
+
+    for asset_id in result.orphans_to_delete:
+        record = state.get(asset_id)
+        if record is not None:
+            _delete_if_exists(record.local_path)
+            _delete_control_file(record.local_path)
+            state.delete(asset_id)
+        log.info("agent.reconcile_orphan_deleted", asset_id=asset_id)
+
+    for asset_id in result.missing_to_redownload:
+        state.delete(asset_id)
+        log.info("agent.reconcile_missing_cleared", asset_id=asset_id)
+
+    log.info(
+        "agent.reconcile_done",
+        assets_present=len(assets_present),
+        orphans=len(result.orphans_to_delete),
+        missing=len(result.missing_to_redownload),
+        library_root=str(library_root),
+    )
+
+
 def _handle_ready(
     *,
     assignment: AssignmentItem,
@@ -108,66 +138,89 @@ def _handle_ready(
     record = state.get(asset_id)
 
     if record is not None:
-        if record.status == "failed":
-            # Transient failure (network drop, server hiccup). Clear state and let
-            # crash-recovery on the next poll decide: confirm if file is complete, re-queue otherwise.
-            _delete_control_file(local_path)
+        if record.status == "delivered":
+            if local_path.is_file():
+                actual_sha = _sha256_file(local_path) if assignment.sha256 is not None else ""
+                local_size = local_path.stat().st_size
+                sha_ok = assignment.sha256 is None or actual_sha == assignment.sha256
+                size_ok = assignment.size_bytes is None or local_size == assignment.size_bytes
+                if sha_ok and size_ok:
+                    server.confirm_delivered(asset_id, actual_sha, local_size)
+                    return
+                _delete_if_exists(local_path)
+                _delete_control_file(local_path)
+            state.delete(asset_id)
+        else:
+            if record.status == "failed":
+                # Transient failure. Clear state and let crash-recovery on the next
+                # poll decide: confirm if complete, re-queue otherwise.
+                _delete_control_file(local_path)
+                state.delete(asset_id)
+                return
+
+            # status == 'active': check aria2
+            info = aria2.get_status(record.gid)
+            if info.status in (DownloadStatus.ACTIVE, DownloadStatus.WAITING):
+                # In-progress — nothing to do.
+                return
+
+            if info.status == DownloadStatus.COMPLETE:
+                _confirm_or_requeue(
+                    assignment=assignment,
+                    asset_id=asset_id,
+                    asset_dir=asset_dir,
+                    local_path=local_path,
+                    state=state,
+                    aria2=aria2,
+                    server=server,
+                    server_token=server_token,
+                    log=log,
+                )
+                return
+
+            if info.status == DownloadStatus.ERROR:
+                log.warning("agent.download_aria2_error", gid=record.gid)
+                # Delete .aria2 control file so crash-recovery sees a clean file.
+                # Next poll: confirm if complete, re-queue if partial or missing.
+                _delete_control_file(local_path)
+                state.delete(asset_id)
+                return
+
+            # OTHER (paused / removed) — stale entry; delete so we re-queue next poll.
+            log.warning("agent.download_stale_gid", gid=record.gid, status=info.status)
             state.delete(asset_id)
             return
-
-        # status == 'active': check aria2
-        info = aria2.get_status(record.gid)
-        if info.status in (DownloadStatus.ACTIVE, DownloadStatus.WAITING):
-            # In-progress — nothing to do.
-            return
-
-        if info.status == DownloadStatus.COMPLETE:
-            _confirm_or_requeue(
-                assignment=assignment,
-                asset_id=asset_id,
-                asset_dir=asset_dir,
-                local_path=local_path,
-                state=state,
-                aria2=aria2,
-                server=server,
-                server_token=server_token,
-                log=log,
-            )
-            return
-
-        if info.status == DownloadStatus.ERROR:
-            log.warning("agent.download_aria2_error", gid=record.gid)
-            # Delete .aria2 control file so crash-recovery sees a clean file.
-            # Next poll: confirm if complete, re-queue if partial or missing.
-            _delete_control_file(local_path)
-            state.delete(asset_id)
-            return
-
-        # OTHER (paused / removed) — stale entry; delete so we re-queue next poll.
-        log.warning("agent.download_stale_gid", gid=record.gid, status=info.status)
-        state.delete(asset_id)
-        return
 
     # No state record — crash-recovery check.
     if local_path.exists():
         # For passthrough (sha256=None), verify size before the expensive sha256 hash.
-        if assignment.sha256 is None and assignment.size_bytes:
-            if local_path.stat().st_size != assignment.size_bytes:
-                log.warning("agent.crash_recovery_size_mismatch", asset_id=asset_id)
-                log.warning("agent.deleting_file", reason="size_mismatch")
-                _delete_if_exists(local_path)
-                _delete_control_file(local_path)
-                return  # re-queue next poll
-        actual_sha = _sha256_file(local_path)
+        if (
+            assignment.sha256 is None
+            and assignment.size_bytes is not None
+            and local_path.stat().st_size != assignment.size_bytes
+        ):
+            log.warning("agent.crash_recovery_size_mismatch", asset_id=asset_id)
+            log.warning("agent.deleting_file", reason="size_mismatch")
+            _delete_if_exists(local_path)
+            _delete_control_file(local_path)
+            return  # re-queue next poll
+        actual_sha = _sha256_file(local_path) if assignment.sha256 is not None else ""
+        local_size = local_path.stat().st_size
         # sha256=None means passthrough (no server-side hash); skip local verification.
         if assignment.sha256 is None or actual_sha == assignment.sha256:
             log.info("agent.crash_recovery_confirm", asset_id=asset_id)
             ok = server.confirm_delivered(
                 asset_id,
                 actual_sha,
-                assignment.size_bytes or 0,
+                local_size,
             )
             if ok:
+                state.upsert(
+                    asset_id,
+                    gid="crash-recovery",
+                    local_path=local_path,
+                    status="delivered",
+                )
                 return
             log.warning("agent.confirm_mismatch_on_recovery", asset_id=asset_id)
             log.warning("agent.deleting_file", reason="confirm_mismatch")
@@ -210,17 +263,18 @@ def _confirm_or_requeue(
         log.warning("agent.complete_but_missing", asset_id=asset_id)
         state.delete(asset_id)
         return
-    actual_sha = _sha256_file(local_path)
+    actual_sha = _sha256_file(local_path) if assignment.sha256 is not None else ""
+    local_size = local_path.stat().st_size
     # sha256=None means passthrough; skip local sha256 verification.
     sha256_ok = assignment.sha256 is None or actual_sha == assignment.sha256
     if sha256_ok:
         ok = server.confirm_delivered(
             asset_id,
             actual_sha,
-            assignment.size_bytes or 0,
+            local_size,
         )
         if ok:
-            state.delete(asset_id)
+            state.set_delivered(asset_id)
             log.info("agent.confirm_delivered", asset_id=asset_id)
         else:
             log.warning("agent.confirm_mismatch", asset_id=asset_id)
@@ -259,7 +313,7 @@ def _handle_evict(
     log: structlog.stdlib.BoundLogger,
 ) -> None:
     record = state.get(asset_id)
-    if record is not None:
+    if record is not None and record.status != "delivered":
         try:
             aria2.remove(record.gid)
         except Exception as exc:

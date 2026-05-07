@@ -11,8 +11,10 @@ import structlog
 from syncarr_agent.aria2_client import Aria2Client
 from syncarr_agent.client import ServerClient
 from syncarr_agent.config import load
-from syncarr_agent.reconciler import reconcile
+from syncarr_agent.reconciler import reconcile, run_reconcile
 from syncarr_agent.state import StateDB
+
+RECONCILE_INTERVAL_SECONDS = 24 * 3600
 
 
 def run(config_path: Path) -> None:
@@ -24,6 +26,13 @@ def run(config_path: Path) -> None:
     log: structlog.stdlib.BoundLogger = structlog.get_logger()
 
     log.info("agent.start", server=config.server_url)
+    last_reconcile = 0.0
+
+    try:
+        run_reconcile(state, server, config.library_root, log)
+        last_reconcile = time.time()
+    except Exception as exc:
+        log.warning("agent.reconcile_error", error=str(exc))
 
     while True:
         try:
@@ -43,6 +52,9 @@ def run(config_path: Path) -> None:
                 config.token,
                 log,
             )
+            if time.time() - last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+                run_reconcile(state, server, config.library_root, log)
+                last_reconcile = time.time()
         except Exception as exc:
             log.warning("agent.poll_error", error=str(exc))
 

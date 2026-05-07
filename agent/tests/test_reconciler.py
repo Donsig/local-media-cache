@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
+from typing import Any
 
+import httpx
 import structlog
 
 from syncarr_agent.aria2_client import DownloadStatus
-from syncarr_agent.client import AssignmentItem
-from syncarr_agent.reconciler import reconcile
-from syncarr_agent.state import DownloadRecord
+from syncarr_agent.client import AssignmentItem, ReconcileResponse, ServerClient
+from syncarr_agent.reconciler import reconcile, run_reconcile
+from syncarr_agent.state import DownloadRecord, StateDB
 
 SERVER_TOKEN = "test-token"
 
@@ -48,7 +51,13 @@ def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def _add_record(mock_state, assignment: AssignmentItem, local_path: Path, gid: str, status: str = "active") -> None:
+def _add_record(
+    mock_state,
+    assignment: AssignmentItem,
+    local_path: Path,
+    gid: str,
+    status: str = "active",
+) -> None:
     mock_state.add_record(
         DownloadRecord(
             asset_id=assignment.asset_id,
@@ -60,7 +69,13 @@ def _add_record(mock_state, assignment: AssignmentItem, local_path: Path, gid: s
     )
 
 
-def _run_reconcile(assignments, mock_state, mock_aria2, mock_server, tmp_library_root: Path) -> None:
+def _run_reconcile(
+    assignments,
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
     reconcile(
         assignments=assignments,
         state=mock_state,
@@ -70,6 +85,35 @@ def _run_reconcile(assignments, mock_state, mock_aria2, mock_server, tmp_library
         server_token=SERVER_TOKEN,
         log=structlog.get_logger(),
     )
+
+
+def _real_state(tmp_path: Path) -> StateDB:
+    return StateDB(tmp_path / "state.db")
+
+
+class _ReconcileServer:
+    def __init__(
+        self,
+        *,
+        response: ReconcileResponse | None = None,
+    ) -> None:
+        self.response = response or ReconcileResponse([], [])
+        self.reconcile_calls: list[list[int]] = []
+        self.delivered_confirms: list[dict[str, Any]] = []
+        self.evicted_confirms: list[int] = []
+
+    def reconcile(self, assets_present: list[int]) -> ReconcileResponse:
+        self.reconcile_calls.append(assets_present)
+        return self.response
+
+    def confirm_delivered(self, asset_id: int, sha256: str, size_bytes: int) -> bool:
+        self.delivered_confirms.append(
+            {"asset_id": asset_id, "sha256": sha256, "size_bytes": size_bytes}
+        )
+        return True
+
+    def confirm_evicted(self, asset_id: int) -> None:
+        self.evicted_confirms.append(asset_id)
 
 
 def test_queued_assignment_is_noop(
@@ -135,19 +179,20 @@ def test_ready_active_download_is_noop(
 
 
 def test_ready_complete_sha256_match_confirms_delivered(
-    mock_state,
     mock_aria2,
     mock_server,
+    tmp_path: Path,
     tmp_library_root: Path,
 ) -> None:
     content = b"verified media bytes"
     assignment = _assignment(sha256=_sha256(content), size_bytes=len(content))
     local_path = _local_path(tmp_library_root, assignment)
+    state = _real_state(tmp_path)
     _write_file(local_path, content)
-    _add_record(mock_state, assignment, local_path, "gid001")
+    state.upsert(assignment.asset_id, "gid001", local_path, status="active")
     mock_aria2.set_status("gid001", DownloadStatus.COMPLETE)
 
-    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+    _run_reconcile([assignment], state, mock_aria2, mock_server, tmp_library_root)
 
     assert mock_server.delivered_confirms == [
         {
@@ -156,7 +201,9 @@ def test_ready_complete_sha256_match_confirms_delivered(
             "size_bytes": len(content),
         }
     ]
-    assert mock_state.deleted == [assignment.asset_id]
+    record = state.get(assignment.asset_id)
+    assert record is not None
+    assert record.status == "delivered"
 
 
 def test_ready_complete_sha256_mismatch_requeues(
@@ -355,6 +402,13 @@ def test_ready_crash_recovery_file_matches_confirms_without_aria2(
             "size_bytes": len(content),
         }
     ]
+    assert mock_state.get(assignment.asset_id) == DownloadRecord(
+        asset_id=assignment.asset_id,
+        gid="crash-recovery",
+        local_path=local_path,
+        status="delivered",
+        started_at="2026-01-01T00:00:00+00:00",
+    )
 
 
 def test_crash_recovery_passthrough_complete_confirms(
@@ -373,6 +427,7 @@ def test_crash_recovery_passthrough_complete_confirms(
 
     assert mock_server.delivered_confirms != []
     assert mock_server.delivered_confirms[0]["asset_id"] == assignment.asset_id
+    assert mock_server.delivered_confirms[0]["sha256"] == ""
     assert mock_aria2._add_calls == []
 
 
@@ -529,3 +584,207 @@ def test_evict_leaves_non_empty_parent_dirs(
     assert not local_path.exists()
     assert local_path.parent.exists()  # Season 1 still has S01E02
     assert sibling.exists()
+
+
+def test_confirm_delivered_sets_delivered_status(
+    mock_aria2,
+    mock_server,
+    tmp_path: Path,
+    tmp_library_root: Path,
+) -> None:
+    content = b"confirm updates state"
+    assignment = _assignment(sha256=_sha256(content), size_bytes=len(content))
+    local_path = _local_path(tmp_library_root, assignment)
+    state = _real_state(tmp_path)
+    _write_file(local_path, content)
+    state.upsert(assignment.asset_id, "gid001", local_path, status="active")
+    mock_aria2.set_status("gid001", DownloadStatus.COMPLETE)
+
+    _run_reconcile([assignment], state, mock_aria2, mock_server, tmp_library_root)
+
+    record = state.get(assignment.asset_id)
+    assert record is not None
+    assert record.status == "delivered"
+
+
+def test_run_reconcile_reports_delivered_files(tmp_path: Path) -> None:
+    state = _real_state(tmp_path)
+    local_path = tmp_path / "library" / "show" / "episode.mkv"
+    _write_file(local_path, b"delivered")
+    state.upsert(55, "gid001", local_path, status="delivered")
+    server = _ReconcileServer()
+
+    run_reconcile(state, server, local_path.parent, structlog.get_logger())
+
+    assert server.reconcile_calls == [[55]]
+
+
+def test_run_reconcile_excludes_missing_file(tmp_path: Path) -> None:
+    state = _real_state(tmp_path)
+    local_path = tmp_path / "library" / "show" / "missing.mkv"
+    state.upsert(55, "gid001", local_path, status="delivered")
+    server = _ReconcileServer()
+
+    run_reconcile(state, server, local_path.parent, structlog.get_logger())
+
+    assert server.reconcile_calls == [[]]
+
+
+def test_run_reconcile_deletes_orphan(tmp_path: Path) -> None:
+    state = _real_state(tmp_path)
+    local_path = tmp_path / "library" / "show" / "orphan.mkv"
+    _write_file(local_path, b"orphan")
+    control_file = local_path.parent / (local_path.name + ".aria2")
+    _write_file(control_file, b"control")
+    state.upsert(99, "gid001", local_path, status="delivered")
+    server = _ReconcileServer(response=ReconcileResponse([99], []))
+
+    run_reconcile(state, server, local_path.parent, structlog.get_logger())
+
+    assert not local_path.exists()
+    assert not control_file.exists()
+    assert state.get(99) is None
+
+
+def test_run_reconcile_clears_missing_record(tmp_path: Path) -> None:
+    state = _real_state(tmp_path)
+    local_path = tmp_path / "library" / "show" / "episode.mkv"
+    state.upsert(10, "gid001", local_path, status="delivered")
+    server = _ReconcileServer(response=ReconcileResponse([], [10]))
+
+    run_reconcile(state, server, local_path.parent, structlog.get_logger())
+
+    assert state.get(10) is None
+
+
+def test_crash_recovery_confirm_writes_delivered_record(
+    mock_aria2,
+    mock_server,
+    tmp_path: Path,
+    tmp_library_root: Path,
+) -> None:
+    content = b"recovered media bytes"
+    assignment = _assignment(sha256=_sha256(content), size_bytes=len(content))
+    local_path = _local_path(tmp_library_root, assignment)
+    state = _real_state(tmp_path)
+    _write_file(local_path, content)
+
+    _run_reconcile([assignment], state, mock_aria2, mock_server, tmp_library_root)
+
+    record = state.get(assignment.asset_id)
+    assert record is not None
+    assert record.gid == "crash-recovery"
+    assert record.status == "delivered"
+    assert record.local_path == local_path
+
+
+def test_handle_ready_stale_delivered_file_missing(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    _add_record(mock_state, assignment, local_path, "gid001", status="delivered")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_state.deleted == [assignment.asset_id]
+    assert len(mock_aria2._add_calls) == 1
+    assert mock_aria2._add_calls[0]["url"] == assignment.download_url
+
+
+def test_handle_ready_stale_delivered_file_present(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    content = b"still delivered"
+    assignment = _assignment(sha256=_sha256(content), size_bytes=len(content))
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, content)
+    _add_record(mock_state, assignment, local_path, "crash-recovery", status="delivered")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_server.delivered_confirms == [
+        {
+            "asset_id": assignment.asset_id,
+            "sha256": assignment.sha256,
+            "size_bytes": len(content),
+        }
+    ]
+    assert mock_state.deleted == []
+    assert mock_aria2._remove_calls == []
+    assert mock_aria2._add_calls == []
+
+
+def test_handle_ready_stale_delivered_passthrough_size_mismatch(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    content = b"wrong size passthrough"
+    assignment = _assignment(sha256=None, size_bytes=len(content) + 1)
+    local_path = _local_path(tmp_library_root, assignment)
+    control_file = local_path.parent / (local_path.name + ".aria2")
+    _write_file(local_path, content)
+    _write_file(control_file, b"control")
+    _add_record(mock_state, assignment, local_path, "crash-recovery", status="delivered")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert not local_path.exists()
+    assert not control_file.exists()
+    assert mock_server.delivered_confirms == []
+    assert mock_state.deleted == [assignment.asset_id]
+    assert len(mock_aria2._add_calls) == 1
+
+
+def test_evict_delivered_record_skips_aria2(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    assignment = _assignment(state="evict", sha256=None, size_bytes=None, download_url=None)
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, b"delivered file")
+    _add_record(mock_state, assignment, local_path, "crash-recovery", status="delivered")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_aria2._remove_calls == []
+    assert not local_path.exists()
+    assert mock_server.evicted_confirms == [assignment.asset_id]
+    assert mock_state.deleted == [assignment.asset_id]
+
+
+def test_server_client_reconcile() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/reconcile"
+        assert request.method == "POST"
+        assert json.loads(request.content.decode()) == {"assets_present": [1, 2]}
+        return httpx.Response(
+            200,
+            json={
+                "orphans_to_delete": [3],
+                "missing_to_redownload": [4],
+            },
+        )
+
+    client = ServerClient(
+        "http://server:8000",
+        "token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = client.reconcile([1, 2])
+
+    assert result == ReconcileResponse(
+        orphans_to_delete=[3],
+        missing_to_redownload=[4],
+    )
