@@ -124,6 +124,12 @@ Step "T2: Agent kill mid-download"
 
 ssh satellite "rm -f ~/media/.syncarr/state.db"
 Info "state.db wiped before T2 agent start (clean GID slate)"
+# Wipe aria2 session file — stale GIDs with sha256 checksums compete with fresh downloads,
+# detect mismatch, delete the file, and retry. This trashes delivered files silently.
+ssh satellite "echo '' | gzip > ~/.config/aria2/session.gz"
+Info "aria2 session cleared (prevents stale GID sha256 conflicts)"
+ssh satellite "systemctl --user restart aria2"
+Start-Sleep 3
 ssh satellite "systemctl --user start syncarr-agent"
 Info "Agent started -- waiting for aria2 to pick up download..."
 
