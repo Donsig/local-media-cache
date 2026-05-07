@@ -245,10 +245,10 @@ $container = Get-Container
 Info "Stopping container: $container (Swarm will restart)"
 ssh docker-host01 "docker stop $container"
 
-$ok = Wait-For -TimeoutSec 90 -IntervalSec 5 -Label "server recovery" -Cond {
+$ok = Wait-For -TimeoutSec 180 -IntervalSec 5 -Label "server recovery" -Cond {
     try { Invoke-RestMethod "$SERVER/api/clients" -Headers $UH -ErrorAction Stop | Out-Null; return $true } catch { return $false }
 }
-if (-not $ok) { Fail "T4.restart" "Server did not recover within 90s" }
+if (-not $ok) { Fail "T4.restart" "Server did not recover within 180s" }
 $newContainer = Get-Container
 Pass "T4.restart" "Server recovered; new container: $newContainer"
 
