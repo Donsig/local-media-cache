@@ -291,6 +291,26 @@ def test_ready_failed_with_file_still_skips(
     assert mock_server.delivered_confirms == []
 
 
+def test_ready_complete_but_missing_file_requeues(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """aria2 COMPLETE but file absent -> delete state (re-queue next poll)."""
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    # File does NOT exist
+    _add_record(mock_state, assignment, local_path, "gid001")
+    mock_aria2.set_status("gid001", DownloadStatus.COMPLETE)
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_state.deleted == [assignment.asset_id]
+    assert mock_server.delivered_confirms == []
+    assert mock_aria2._add_calls == []  # re-queue on next poll
+
+
 def test_ready_stale_gid_clears_state(
     mock_state,
     mock_aria2,
