@@ -391,15 +391,17 @@ async def test_passthrough_asset_skips_ffmpeg(
     assert mock_ffmpeg.calls == []
     assert asset.status == "ready"
     assert asset.cache_path is None
-    assert asset.sha256 == hashlib.sha256(source_bytes).hexdigest()
+    assert asset.sha256 is None  # Bug #20: passthrough skips server-side hash; sha256=None by design
     assert asset.size_bytes == len(source_bytes)
 
 
 async def test_passthrough_asset_no_transcoding_state(
     db_session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Bug #20 removed the server-side hash for passthrough assets, making processing instant.
+    # The invariant "passthrough never enters transcoding state" is verified by checking
+    # the final state transitions directly — no intermediate blocking is needed or possible.
     source_bytes = b"passthrough-video"
     source_path = tmp_path / "source.mkv"
     source_path.write_bytes(source_bytes)
@@ -416,26 +418,9 @@ async def test_passthrough_asset_no_transcoding_state(
         source_path=source_path,
     )
 
-    started = threading.Event()
-    release = threading.Event()
-
-    def _blocking_stat_and_hash(path: str) -> tuple[int, str]:
-        assert path == str(source_path)
-        started.set()
-        assert release.wait(timeout=5)
-        return len(source_bytes), hashlib.sha256(source_bytes).hexdigest()
-
-    monkeypatch.setattr("syncarr_server.transcoder._stat_and_hash", _blocking_stat_and_hash)
     worker = PassthroughWorker(db_session_factory, _make_settings(tmp_path / "cache"))
+    await worker.run_once()
 
-    task = asyncio.create_task(worker.run_once())
-    await asyncio.to_thread(started.wait, 5)
-
-    asset_during_hash = await _get_asset(db_session_factory, asset_id)
-    assert asset_during_hash.status == "queued"
-
-    release.set()
-    await task
     asset = await _get_asset(db_session_factory, asset_id)
-
     assert asset.status == "ready"
+    assert asset.cache_path is None  # passthrough: no transcoding state, no cache file

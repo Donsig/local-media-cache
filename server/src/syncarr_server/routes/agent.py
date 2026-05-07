@@ -21,6 +21,8 @@ from syncarr_server.schemas import (
     AgentAssignmentState,
     AgentConfirmRequest,
     AgentConfirmResponse,
+    ReconcileRequest,
+    ReconcileResponse,
 )
 
 router = APIRouter(tags=["agent"])
@@ -170,6 +172,47 @@ async def download_asset(
 
 
 @router.post(
+    "/reconcile",
+    response_model=ReconcileResponse,
+)
+async def reconcile_assignments(
+    payload: ReconcileRequest,
+    client: Annotated[Client, Depends(require_agent_auth)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ReconcileResponse:
+    present_set = set(payload.assets_present)
+
+    delivered_result = await session.execute(
+        select(Assignment).where(
+            Assignment.client_id == client.id,
+            Assignment.state == "delivered",
+        ),
+    )
+    missing_to_redownload: list[int] = []
+    for assignment in delivered_result.scalars():
+        if assignment.asset_id in present_set:
+            continue
+        assignment.state = "pending"
+        assignment.delivered_at = None
+        missing_to_redownload.append(assignment.asset_id)
+
+    active_result = await session.execute(
+        select(Assignment.asset_id).where(
+            Assignment.client_id == client.id,
+            Assignment.state.in_(("pending", "delivered")),
+        ),
+    )
+    active_ids = set(active_result.scalars())
+    orphans_to_delete = [asset_id for asset_id in present_set if asset_id not in active_ids]
+
+    await session.commit()
+    return ReconcileResponse(
+        orphans_to_delete=sorted(orphans_to_delete),
+        missing_to_redownload=sorted(missing_to_redownload),
+    )
+
+
+@router.post(
     "/confirm/{asset_id}",
     response_model=AgentConfirmResponse,
     response_model_exclude_none=True,
@@ -219,4 +262,3 @@ async def confirm_asset(
     assignment.delivered_at = _utc_now()
     await session.commit()
     return AgentConfirmResponse(ok=True)
-

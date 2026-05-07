@@ -507,3 +507,183 @@ async def test_confirm_is_idempotent(
     assert response.json() == {"ok": True}
     assert assignment is not None
     assert assignment.state == "delivered"
+
+
+async def test_reconcile_present_delivered_unchanged(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        assignment_state="delivered",
+    )
+
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [asset_id], "total_bytes": agent_test_files.cache_size_bytes},
+    )
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+
+    assert response.status_code == 200
+    assert sorted(response.json()["orphans_to_delete"]) == []
+    assert sorted(response.json()["missing_to_redownload"]) == []
+    assert assignment is not None
+    assert assignment.state == "delivered"
+
+
+async def test_reconcile_flips_missing_delivered_to_pending(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        assignment_state="delivered",
+    )
+
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [], "total_bytes": 0},
+    )
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+
+    assert response.status_code == 200
+    assert sorted(response.json()["missing_to_redownload"]) == [asset_id]
+    assert sorted(response.json()["orphans_to_delete"]) == []
+    assert assignment is not None
+    assert assignment.state == "pending"
+    assert assignment.delivered_at is None
+
+
+async def test_reconcile_returns_orphan(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [999], "total_bytes": 0},
+    )
+
+    assert response.status_code == 200
+    assert sorted(response.json()["orphans_to_delete"]) == [999]
+    assert sorted(response.json()["missing_to_redownload"]) == []
+
+
+async def test_reconcile_ignores_pending_assignment(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        assignment_state="pending",
+    )
+
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [], "total_bytes": 0},
+    )
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+
+    assert response.status_code == 200
+    assert asset_id not in set(response.json()["missing_to_redownload"])
+    assert sorted(response.json()["orphans_to_delete"]) == []
+    assert assignment is not None
+    assert assignment.state == "pending"
+
+
+async def test_reconcile_empty_request(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [], "total_bytes": 0},
+    )
+
+    assert response.status_code == 200
+    assert sorted(response.json()["orphans_to_delete"]) == []
+    assert sorted(response.json()["missing_to_redownload"]) == []
+
+
+async def test_reconcile_agent_scoped(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    client_a_id = agent_client.id
+    asset_a_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_a_id,
+        files=agent_test_files,
+        source_media_id="media-a",
+        assignment_state="delivered",
+    )
+
+    client_b = Client(
+        id="reconcile-agent-b",
+        name="Reconcile Agent B",
+        auth_token="agent-reconcile-agent-b-token123",
+        storage_budget_bytes=None,
+        last_seen=None,
+        created_at=datetime.now(UTC),
+        decommissioning=False,
+    )
+    client_b_id = client_b.id
+    db_session.add(client_b)
+    await db_session.commit()
+
+    asset_b_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_b_id,
+        files=agent_test_files,
+        source_media_id="media-b",
+        assignment_state="delivered",
+    )
+
+    response = await http_client.post(
+        "/reconcile",
+        headers=auth_headers_agent,
+        json={"assets_present": [], "total_bytes": 0},
+    )
+    db_session.expire_all()
+    assignment_a = await _get_assignment(db_session, client_id=client_a_id, asset_id=asset_a_id)
+    assignment_b = await _get_assignment(db_session, client_id=client_b_id, asset_id=asset_b_id)
+
+    assert response.status_code == 200
+    assert sorted(response.json()["missing_to_redownload"]) == [asset_a_id]
+    assert sorted(response.json()["orphans_to_delete"]) == []
+    assert assignment_a is not None
+    assert assignment_a.state == "pending"
+    assert assignment_a.delivered_at is None
+    assert assignment_b is not None
+    assert assignment_b.state == "delivered"
+    assert assignment_b.delivered_at is not None

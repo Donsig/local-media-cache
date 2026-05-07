@@ -216,3 +216,13 @@ class AgentConfirmResponse(Schema):
     reason: AgentConfirmMismatchReason | None = None
     expected_sha256: str | None = None
     actual_sha256: str | None = None
+
+
+class ReconcileRequest(Schema):
+    assets_present: list[int]
+    total_bytes: int = 0
+
+
+class ReconcileResponse(Schema):
+    orphans_to_delete: list[int]
+    missing_to_redownload: list[int]
