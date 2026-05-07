@@ -242,8 +242,8 @@ Step "T4: Server container restart (state persistence)"
 # ============================================================
 
 $container = Get-Container
-Info "Stopping container: $container (Swarm will restart)"
-ssh docker-host01 "docker stop $container"
+Info "Killing container: $container (SIGKILL triggers Swarm restart)"
+ssh docker-host01 "docker kill $container"
 
 $ok = Wait-For -TimeoutSec 180 -IntervalSec 5 -Label "server recovery" -Cond {
     try { Invoke-RestMethod "$SERVER/api/clients" -Headers $UH -ErrorAction Stop | Out-Null; return $true } catch { return $false }
