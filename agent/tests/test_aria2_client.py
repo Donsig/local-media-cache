@@ -55,7 +55,7 @@ def test_add_download_passes_auth_header(
     mock_dl = _make_mock_download()
     mock_dl.gid = "gid1"
     mock_api_instance = MagicMock()
-    mock_api_instance.add_uris.return_value = [mock_dl]
+    mock_api_instance.add_uris.return_value = mock_dl
     mock_api_cls.return_value = mock_api_instance
 
     client = Aria2Client("127.0.0.1", 6800, "")
@@ -80,7 +80,7 @@ def test_add_download_passes_checksum(
     mock_dl = _make_mock_download()
     mock_dl.gid = "gid2"
     mock_api_instance = MagicMock()
-    mock_api_instance.add_uris.return_value = [mock_dl]
+    mock_api_instance.add_uris.return_value = mock_dl
     mock_api_cls.return_value = mock_api_instance
 
     client = Aria2Client("127.0.0.1", 6800, "")
@@ -105,7 +105,7 @@ def test_add_download_disables_auto_rename(
     mock_dl = _make_mock_download()
     mock_dl.gid = "gid3"
     mock_api_instance = MagicMock()
-    mock_api_instance.add_uris.return_value = [mock_dl]
+    mock_api_instance.add_uris.return_value = mock_dl
     mock_api_cls.return_value = mock_api_instance
 
     client = Aria2Client("127.0.0.1", 6800, "")
@@ -168,6 +168,22 @@ def test_get_status_error(mock_client_cls: MagicMock, mock_api_cls: MagicMock) -
     client = Aria2Client("127.0.0.1", 6800, "")
     info = client.get_status("gid1")
     assert info.status == DownloadStatus.ERROR
+
+
+@patch("syncarr_agent.aria2_client.aria2p.API")
+@patch("syncarr_agent.aria2_client.aria2p.Client")
+def test_get_status_not_found_returns_other(
+    mock_client_cls: MagicMock, mock_api_cls: MagicMock
+) -> None:
+    mock_api_instance = MagicMock()
+    mock_api_instance.get_download.side_effect = aria2p.ClientException(
+        1, "GID#stale is not found"
+    )
+    mock_api_cls.return_value = mock_api_instance
+
+    client = Aria2Client("127.0.0.1", 6800, "")
+    info = client.get_status("stale-gid")
+    assert info.status == DownloadStatus.OTHER
 
 
 @patch("syncarr_agent.aria2_client.aria2p.API")

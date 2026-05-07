@@ -70,7 +70,21 @@ class Aria2Client:
         return str(download.gid)
 
     def get_status(self, gid: str) -> DownloadInfo:
-        dl = self._api.get_download(gid)
+        try:
+            dl = self._api.get_download(gid)
+        except aria2p.ClientException as exc:
+            # Only catch "not found" — not _is_not_found() which also matches "gid#"
+            # in non-not-found messages. Explicit check avoids silently swallowing real
+            # errors.
+            msg = str(exc).lower()
+            if "not found" in msg:
+                return DownloadInfo(
+                    gid=gid,
+                    status=DownloadStatus.OTHER,
+                    completed_length=0,
+                    total_length=0,
+                )
+            raise
         raw = dl.status
         if raw == "complete":
             status = DownloadStatus.COMPLETE
