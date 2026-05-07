@@ -211,24 +211,28 @@ def test_ready_complete_server_confirm_mismatch_requeues(
     assert mock_aria2._add_calls == []
 
 
-def test_ready_aria2_error_with_file_sets_failed(
+def test_ready_aria2_error_with_file_clears_state_for_recovery(
     mock_state,
     mock_aria2,
     mock_server,
     tmp_library_root: Path,
 ) -> None:
-    """aria2 ERROR + file present -> set_failed (disk-full / IO error; operator must
-    intervene)."""
+    """aria2 ERROR + file present -> clear state + delete .aria2 control file.
+    Crash-recovery on the next poll will confirm delivery (if complete) or re-queue."""
     assignment = _assignment()
     local_path = _local_path(tmp_library_root, assignment)
-    _write_file(local_path, b"partial download")  # file exists (disk-full scenario)
+    _write_file(local_path, b"partial download")
+    control_file = local_path.parent / (local_path.name + ".aria2")
+    _write_file(control_file, b"aria2 control data")
     _add_record(mock_state, assignment, local_path, "gid001")
     mock_aria2.set_status("gid001", DownloadStatus.ERROR)
 
     _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
 
-    assert mock_state.set_failed_calls == [assignment.asset_id]
-    assert mock_server.delivered_confirms == []
+    assert mock_state.deleted == [assignment.asset_id]
+    assert mock_state.set_failed_calls == []
+    assert not control_file.exists()
+    assert local_path.exists()  # .mkv preserved; crash-recovery decides on next poll
 
 
 def test_ready_stale_failed_no_file_auto_clears(
@@ -271,24 +275,26 @@ def test_ready_aria2_error_no_file_clears_state(
     assert mock_aria2._add_calls == []  # re-queue is on next poll, not this one
 
 
-def test_ready_failed_with_file_still_skips(
+def test_ready_failed_with_file_self_heals(
     mock_state,
     mock_aria2,
     mock_server,
     tmp_library_root: Path,
 ) -> None:
-    """Failed record + file present -> log warning and skip (disk-full scenario)."""
+    """Failed record + file present -> clear state + delete .aria2 control file.
+    Crash-recovery on the next poll will confirm delivery (if complete) or re-queue."""
     assignment = _assignment()
     local_path = _local_path(tmp_library_root, assignment)
-    _write_file(local_path, b"partial download - disk full scenario")
+    _write_file(local_path, b"partial download - self heal scenario")
+    control_file = local_path.parent / (local_path.name + ".aria2")
+    _write_file(control_file, b"aria2 control data")
     _add_record(mock_state, assignment, local_path, "old-gid", status="failed")
 
     _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
 
-    assert mock_state.deleted == []
-    assert mock_state.set_failed_calls == []  # already failed, not re-set
-    assert mock_aria2._add_calls == []
-    assert mock_server.delivered_confirms == []
+    assert mock_state.deleted == [assignment.asset_id]
+    assert not control_file.exists()
+    assert local_path.exists()  # .mkv preserved; crash-recovery decides on next poll
 
 
 def test_ready_complete_but_missing_file_requeues(
@@ -349,6 +355,44 @@ def test_ready_crash_recovery_file_matches_confirms_without_aria2(
             "size_bytes": len(content),
         }
     ]
+
+
+def test_crash_recovery_passthrough_complete_confirms(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Passthrough crash-recovery: file exists with matching size -> confirm delivery."""
+    content = b"complete passthrough file"
+    assignment = _assignment(sha256=None, size_bytes=len(content))
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, content)
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_server.delivered_confirms != []
+    assert mock_server.delivered_confirms[0]["asset_id"] == assignment.asset_id
+    assert mock_aria2._add_calls == []
+
+
+def test_crash_recovery_passthrough_size_mismatch_deletes_and_requeues(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Passthrough crash-recovery: file present but smaller than expected -> delete + re-queue."""
+    content = b"partial passthrough file"
+    assignment = _assignment(sha256=None, size_bytes=len(content) + 1000)
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, content)
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert not local_path.exists()
+    assert mock_server.delivered_confirms == []
+    assert mock_aria2._add_calls == []  # re-queue happens on next poll (no state + no file path)
 
 
 def test_ready_crash_recovery_file_corrupt_deletes_and_requeues(

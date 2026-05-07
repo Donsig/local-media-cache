@@ -34,7 +34,7 @@ def _delete_if_exists(path: Path) -> None:
 
 def _delete_control_file(local_path: Path) -> None:
     """Delete the .aria2 control file alongside a download if present."""
-    _delete_if_exists(local_path.with_suffix(".aria2"))
+    _delete_if_exists(local_path.parent / (local_path.name + ".aria2"))
 
 
 def _cleanup_empty_parents(path: Path, root: Path) -> None:
@@ -109,17 +109,10 @@ def _handle_ready(
 
     if record is not None:
         if record.status == "failed":
-            if not local_path.exists():
-                log.info(
-                    "agent.stale_failed_cleared",
-                    asset_id=asset_id,
-                )
-                state.delete(asset_id)
-                return  # re-queue on next poll
-            log.warning(
-                "agent.download_failed_skip",
-                note="disk full -- operator must clear state.db and free disk",
-            )
+            # Transient failure (network drop, server hiccup). Clear state and let
+            # crash-recovery on the next poll decide: confirm if file is complete, re-queue otherwise.
+            _delete_control_file(local_path)
+            state.delete(asset_id)
             return
 
         # status == 'active': check aria2
@@ -144,10 +137,10 @@ def _handle_ready(
 
         if info.status == DownloadStatus.ERROR:
             log.warning("agent.download_aria2_error", gid=record.gid)
-            if local_path.exists():
-                state.set_failed(asset_id)
-            else:
-                state.delete(asset_id)  # stale GID, no file -- re-queue next poll
+            # Delete .aria2 control file so crash-recovery sees a clean file.
+            # Next poll: confirm if complete, re-queue if partial or missing.
+            _delete_control_file(local_path)
+            state.delete(asset_id)
             return
 
         # OTHER (paused / removed) — stale entry; delete so we re-queue next poll.
@@ -157,6 +150,13 @@ def _handle_ready(
 
     # No state record — crash-recovery check.
     if local_path.exists():
+        # For passthrough (sha256=None), verify size before the expensive sha256 hash.
+        if assignment.sha256 is None and assignment.size_bytes:
+            if local_path.stat().st_size != assignment.size_bytes:
+                log.warning("agent.crash_recovery_size_mismatch", asset_id=asset_id)
+                _delete_if_exists(local_path)
+                _delete_control_file(local_path)
+                return  # re-queue next poll
         actual_sha = _sha256_file(local_path)
         # sha256=None means passthrough (no server-side hash); skip local verification.
         if assignment.sha256 is None or actual_sha == assignment.sha256:
