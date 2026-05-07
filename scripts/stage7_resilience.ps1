@@ -159,7 +159,7 @@ Info "Agent restarted -- waiting for delivery (up to 10 min)..."
 $ok = Wait-For -TimeoutSec 1200 -IntervalSec 10 -Label "delivery confirmed" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
-        $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
+        $pending = @($view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") })
         return $pending.Count -eq 0
     } catch { return $false }
 }
@@ -230,7 +230,7 @@ else { Fail "T3.restart" "aria2 failed to restart" }
 $ok = Wait-For -TimeoutSec 1200 -IntervalSec 10 -Label "delivery after aria2 restart" -Cond {
     try {
         $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH -ErrorAction Stop
-        $pending = $view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") }
+        $pending = @($view.assignments | Where-Object { $_.source_media_id -eq $script:MovieId -and $_.state -in @("ready","queued") })
         return $pending.Count -eq 0
     } catch { return $false }
 }
@@ -276,7 +276,7 @@ Pass "T5.file" "Oppenheimer file evicted from satellite"
 Start-Sleep 5
 # Verify: agent view is clean (no pending/ready/evict for this movie)
 $view = Invoke-RestMethod "$SERVER/assignments" -Headers $AH
-$remaining = $view.assignments | Where-Object { $_.source_media_id -eq $MovieId }
+$remaining = @($view.assignments | Where-Object { $_.source_media_id -eq $MovieId })
 Info "Post-eviction agent view for movie $MovieId`: $($remaining | ConvertTo-Json -Compress)"
 if ($remaining.Count -eq 0) { Pass "T5.gc" "No pending assignments for movie (GC'd or confirmed evicted)" }
 else { Warn "T5.gc" "Unexpected assignments still visible: $($remaining | ConvertTo-Json -Compress)" }

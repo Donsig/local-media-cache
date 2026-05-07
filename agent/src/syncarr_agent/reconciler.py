@@ -154,6 +154,7 @@ def _handle_ready(
         if assignment.sha256 is None and assignment.size_bytes:
             if local_path.stat().st_size != assignment.size_bytes:
                 log.warning("agent.crash_recovery_size_mismatch", asset_id=asset_id)
+                log.warning("agent.deleting_file", reason="size_mismatch")
                 _delete_if_exists(local_path)
                 _delete_control_file(local_path)
                 return  # re-queue next poll
@@ -169,10 +170,12 @@ def _handle_ready(
             if ok:
                 return
             log.warning("agent.confirm_mismatch_on_recovery", asset_id=asset_id)
+            log.warning("agent.deleting_file", reason="confirm_mismatch")
             _delete_if_exists(local_path)
             _delete_control_file(local_path)
         else:
             log.warning("agent.crash_recovery_corrupt", asset_id=asset_id)
+            log.warning("agent.deleting_file", reason="corrupt")
             _delete_if_exists(local_path)
             _delete_control_file(local_path)
 
@@ -221,11 +224,13 @@ def _confirm_or_requeue(
             log.info("agent.confirm_delivered", asset_id=asset_id)
         else:
             log.warning("agent.confirm_mismatch", asset_id=asset_id)
+            log.warning("agent.deleting_file", reason="confirm_mismatch")
             _delete_if_exists(local_path)
             _delete_control_file(local_path)
             state.delete(asset_id)
     else:
         log.warning("agent.sha256_mismatch_local", asset_id=asset_id)
+        log.warning("agent.deleting_file", reason="sha256_mismatch")
         _delete_if_exists(local_path)
         _delete_control_file(local_path)
         state.delete(asset_id)
@@ -263,6 +268,7 @@ def _handle_evict(
             return
 
     # Delete local file and control file, then clean up empty parent dirs.
+    log.warning("agent.deleting_file", reason="evict")
     _delete_if_exists(local_path)
     _delete_control_file(local_path)
     _cleanup_empty_parents(asset_dir, library_root)
