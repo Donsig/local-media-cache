@@ -346,6 +346,42 @@ async def test_list_client_assignments(
     assert other_client_response.status_code == 200
     assert other_client_response.json() == []
 
+    # Also test: delivered assignment -> appears as "ready" in UI view (Bug #16 fix)
+    asset2 = Asset(
+        source_media_id="ep-delivered",
+        profile_id="p1",
+        source_path="/mnt/media/ep-delivered.mkv",
+        cache_path=None,
+        size_bytes=5678,
+        sha256="def456",
+        status="ready",
+        status_detail=None,
+        created_at=datetime.now(UTC),
+        ready_at=datetime.now(UTC),
+    )
+    db_session.add(asset2)
+    await db_session.flush()
+
+    assignment2 = Assignment(
+        client_id="caravan",
+        asset_id=asset2.id,
+        state="delivered",
+        created_at=datetime.now(UTC),
+        delivered_at=datetime.now(UTC),
+        evict_requested_at=None,
+    )
+    db_session.add(assignment2)
+    await db_session.commit()
+
+    delivered_response = await http_client.get(
+        "/clients/caravan/assignments?media_item_ids=ep-delivered",
+        headers=auth_headers_ui,
+    )
+    assert delivered_response.status_code == 200
+    assert delivered_response.json() == [
+        {"media_item_id": "ep-delivered", "state": "ready"}
+    ]
+
 
 async def test_list_all_assets_no_filter(
     http_client: AsyncClient,

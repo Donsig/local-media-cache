@@ -239,6 +239,17 @@ async def list_client_assignments(
     for assignment, asset in result.all():
         effective_state = _effective_state(assignment, asset)
         if effective_state is None:
+            if assignment.state != "delivered":
+                continue
+            # Delivered = file confirmed on satellite; show as "ready" in UI.
+            # Separate append avoids mypy strict narrowing complaint
+            # (None -> Literal reassignment).
+            assignments.append(
+                ClientAssignmentSchema(
+                    media_item_id=asset.source_media_id,
+                    state="ready",
+                )
+            )
             continue
         assignments.append(
             ClientAssignmentSchema(
