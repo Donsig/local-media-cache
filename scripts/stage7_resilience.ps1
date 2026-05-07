@@ -84,22 +84,22 @@ $snapCount = (ssh satellite "find ~/media -type f | wc -l").Trim()
 Info "Existing files on satellite: $snapCount"
 
 # ============================================================
-Step "T1: Discover Oppenheimer + subscribe"
+Step "T1: Subscribe to test item (Bluey S01E08 ~216MB)"
 # ============================================================
 
-$items = (Invoke-RestMethod "$SERVER/api/media/library/2/items?search=Taxi+4" -Headers $UH).items
-$opp   = $items | Where-Object { $_.title -match "Taxi 4" } | Select-Object -First 1
-if (-not $opp) { Fail "T1.find" "Taxi 4 not found in Plex library 2 (Film)" }
-$MovieId = $opp.id
-$sizeGb  = [math]::Round($opp.size_bytes / 1GB, 2)
-Pass "T1.find" "Found id=$MovieId title=$($opp.title) size=${sizeGb}GB"
+# Use a small episode for fast iteration (~216MB vs 6.5GB for Taxi 4)
+$itemResp = (Invoke-RestMethod "$SERVER/api/media/item/16066" -Headers $UH).item
+if (-not $itemResp) { Fail "T1.find" "Bluey S01E08 (id=16066) not found" }
+$MovieId = $itemResp.id
+$sizeGb  = [math]::Round($itemResp.size_bytes / 1GB, 2)
+Pass "T1.find" "Found id=$MovieId title=$($itemResp.title) size=${sizeGb}GB"
 
 # Stop agent so we control when the download starts
 ssh satellite "systemctl --user stop syncarr-agent"
 Info "Agent stopped (controlling download timing)"
 Start-Sleep 2
 
-$subBody = @{ client_id = $ClientId; media_item_id = $MovieId; scope_type = "movie"; scope_params = $null; profile_id = $ProfileId } | ConvertTo-Json
+$subBody = @{ client_id = $ClientId; media_item_id = $MovieId; scope_type = "episode"; scope_params = $null; profile_id = $ProfileId } | ConvertTo-Json
 $sub     = Invoke-RestMethod "$SERVER/api/subscriptions" -Method POST -Headers $UH -Body $subBody
 $SubId   = $sub.id
 Pass "T1.sub" "Subscription created id=$SubId"
@@ -165,7 +165,7 @@ $ok = Wait-For -TimeoutSec 1200 -IntervalSec 10 -Label "delivery confirmed" -Con
 }
 if (-not $ok) { Fail "T2.deliver" "Delivery not confirmed within 20 min" }
 
-$oppFile = ssh satellite "find ~/media -type f \( -name '*.mkv' -o -name '*.mp4' \) | grep -i "taxi.4" || true"
+$oppFile = ssh satellite "find ~/media -type f \( -name '*.mkv' -o -name '*.mp4' \) | grep -i 'bluey' || true"
 if ($oppFile) { Pass "T2.file" "File on satellite: $oppFile" }
 else          { Fail "T2.file" "File NOT found on satellite after delivery" }
 
@@ -178,12 +178,12 @@ Info "Deleting subscription to trigger eviction before re-download test..."
 Invoke-RestMethod "$SERVER/api/subscriptions/$SubId" -Method DELETE -Headers $UH | Out-Null
 
 $ok = Wait-For -TimeoutSec 90 -IntervalSec 5 -Label "eviction before re-subscribe" -Cond {
-    $f = ssh satellite "find ~/media -iname '*taxi*4*' -type f 2>/dev/null || true"
+    $f = ssh satellite "find ~/media -iname '*bluey*' -type f 2>/dev/null || true"
     [string]::IsNullOrWhiteSpace($f)
 }
 if (-not $ok) {
     # Force-delete if agent eviction is slow
-    ssh satellite "find ~/media -iname '*taxi*4*' -type f -delete"
+    ssh satellite "find ~/media -iname '*bluey*' -type f -delete"
     Info "Force-deleted file (agent eviction was slow)"
 }
 
@@ -254,10 +254,10 @@ Pass "T4.restart" "Server recovered; new container: $newContainer"
 
 # Verify: asset still 'ready' in server (file was delivered, asset record persists)
 $assets = (Invoke-RestMethod "$SERVER/api/assets?media_item_ids=$MovieId" -Headers $UH)
-$taxiAsset = $assets | Where-Object { $_.asset_id -eq $AssetId }
-Info "Post-restart asset: $($taxiAsset | ConvertTo-Json -Compress)"
-if ($taxiAsset -and $taxiAsset.status -eq "ready") { Pass "T4.state" "Asset 'ready' state persisted through server restart" }
-else { Fail "T4.state" "Asset state unexpected after restart: $($taxiAsset | ConvertTo-Json -Compress)" }
+$testAsset = $assets | Where-Object { $_.asset_id -eq $AssetId }
+Info "Post-restart asset: $($testAsset | ConvertTo-Json -Compress)"
+if ($testAsset -and $testAsset.status -eq "ready") { Pass "T4.state" "Asset 'ready' state persisted through server restart" }
+else { Fail "T4.state" "Asset state unexpected after restart: $($testAsset | ConvertTo-Json -Compress)" }
 
 # ============================================================
 Step "T5: Eviction"
@@ -267,11 +267,11 @@ Invoke-RestMethod "$SERVER/api/subscriptions/$SubId" -Method DELETE -Headers $UH
 Info "Subscription $SubId deleted"
 
 $ok = Wait-For -TimeoutSec 120 -IntervalSec 5 -Label "file eviction" -Cond {
-    $f = ssh satellite "find ~/media -iname '*taxi*4*' -type f 2>/dev/null || true"
+    $f = ssh satellite "find ~/media -iname '*bluey*' -type f 2>/dev/null || true"
     [string]::IsNullOrWhiteSpace($f)
 }
 if (-not $ok) { Fail "T5.file" "File not removed from satellite within 120s" }
-Pass "T5.file" "Oppenheimer file evicted from satellite"
+Pass "T5.file" "File evicted from satellite"
 
 Start-Sleep 5
 # Verify: agent view is clean (no pending/ready/evict for this movie)
