@@ -211,20 +211,83 @@ def test_ready_complete_server_confirm_mismatch_requeues(
     assert mock_aria2._add_calls == []
 
 
-def test_ready_aria2_error_sets_failed(
+def test_ready_aria2_error_with_file_sets_failed(
     mock_state,
     mock_aria2,
     mock_server,
     tmp_library_root: Path,
 ) -> None:
+    """aria2 ERROR + file present -> set_failed (disk-full / IO error; operator must
+    intervene)."""
     assignment = _assignment()
     local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, b"partial download")  # file exists (disk-full scenario)
     _add_record(mock_state, assignment, local_path, "gid001")
     mock_aria2.set_status("gid001", DownloadStatus.ERROR)
 
     _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
 
     assert mock_state.set_failed_calls == [assignment.asset_id]
+    assert mock_server.delivered_confirms == []
+
+
+def test_ready_stale_failed_no_file_auto_clears(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Stale 'failed' record with no file on disk -> auto-clear, re-queue next poll."""
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    # File does NOT exist -- stale state from prior test run
+    _add_record(mock_state, assignment, local_path, "old-gid", status="failed")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    # State cleared; no set_failed, no add_download (re-queue happens next poll)
+    assert mock_state.deleted == [assignment.asset_id]
+    assert mock_state.set_failed_calls == []
+    assert mock_aria2._add_calls == []
+
+
+def test_ready_aria2_error_no_file_clears_state(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """aria2 ERROR + file absent -> clear state (re-queue next poll), not set_failed."""
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    # File does NOT exist
+    _add_record(mock_state, assignment, local_path, "gid001")
+    mock_aria2.set_status("gid001", DownloadStatus.ERROR)
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_state.deleted == [assignment.asset_id]
+    assert mock_state.set_failed_calls == []
+    assert mock_aria2._add_calls == []  # re-queue is on next poll, not this one
+
+
+def test_ready_failed_with_file_still_skips(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    """Failed record + file present -> log warning and skip (disk-full scenario)."""
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    _write_file(local_path, b"partial download - disk full scenario")
+    _add_record(mock_state, assignment, local_path, "old-gid", status="failed")
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_state.deleted == []
+    assert mock_state.set_failed_calls == []  # already failed, not re-set
+    assert mock_aria2._add_calls == []
     assert mock_server.delivered_confirms == []
 
 

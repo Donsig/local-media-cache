@@ -109,7 +109,17 @@ def _handle_ready(
 
     if record is not None:
         if record.status == "failed":
-            log.warning("agent.download_failed_skip", note="operator must clear state.db and free disk")
+            if not local_path.exists():
+                log.info(
+                    "agent.stale_failed_cleared",
+                    asset_id=asset_id,
+                )
+                state.delete(asset_id)
+                return  # re-queue on next poll
+            log.warning(
+                "agent.download_failed_skip",
+                note="disk full -- operator must clear state.db and free disk",
+            )
             return
 
         # status == 'active': check aria2
@@ -134,7 +144,10 @@ def _handle_ready(
 
         if info.status == DownloadStatus.ERROR:
             log.warning("agent.download_aria2_error", gid=record.gid)
-            state.set_failed(asset_id)
+            if local_path.exists():
+                state.set_failed(asset_id)
+            else:
+                state.delete(asset_id)  # stale GID, no file -- re-queue next poll
             return
 
         # OTHER (paused / removed) — stale entry; delete so we re-queue next poll.
@@ -190,6 +203,10 @@ def _confirm_or_requeue(
     log: structlog.stdlib.BoundLogger,
 ) -> None:
     """Called when aria2 reports COMPLETE. Verify sha256 (if provided) and confirm or re-queue."""
+    if not local_path.exists():
+        log.warning("agent.complete_but_missing", asset_id=asset_id)
+        state.delete(asset_id)
+        return
     actual_sha = _sha256_file(local_path)
     # sha256=None means passthrough; skip local sha256 verification.
     sha256_ok = assignment.sha256 is None or actual_sha == assignment.sha256
