@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:////data/syncarr.db"
     media_cache_path: str = "/mnt/cache"
     transcode_poll_interval_seconds: int = 30
+    agent_poll_interval_seconds: int = 300
     ui_token: str = ""
     media_provider_type: str = "plex"       # "plex" | future: "jellyfin", "emby"
     media_server_url: str = ""              # base URL of the source media server

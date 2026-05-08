@@ -250,7 +250,7 @@ Surface implications:
 
 ### 5.7 Recent confirm-error signal
 
-When the server's confirm endpoint (`POST /assignments/{asset_id}/confirm` in `server/src/syncarr_server/routes/agent.py`, function `confirm_assignment`) rejects an agent's confirm with a checksum mismatch or size mismatch, the server records:
+When the server's confirm endpoint (`POST /assignments/{asset_id}/confirm` in `server/src/syncarr_server/routes/agent.py`, function `confirm_asset`) rejects an agent's confirm with a checksum mismatch or size mismatch, the server records:
 
 ```sql
 last_confirm_error_at         DATETIME NULL
@@ -270,7 +270,7 @@ Pipeline projection enhancement:
 
 Rationale: today, a checksum mismatch causes an aria2 retry that visually looks like a healthy download from scratch. Operators have no signal that the previous round failed. A simple "last attempt failed" tag in the detail line during the next attempt closes that loop without inventing a new substate.
 
-Server change site is a small edit to the existing `confirm_assignment` handler — no agent change.
+Server change site is a small edit to the existing `confirm_asset` handler — no agent change.
 
 ## 6. API
 
@@ -336,7 +336,7 @@ Server can deploy independently of UI: the new fields are populated; the existin
 
 - `GET /api/assets` — keeps `Asset.status` semantics.
 - All agent endpoints (`GET /assignments`, `POST /assignments/{asset_id}/confirm`, `GET /download/{asset_id}`, `PATCH /assignments/{asset_id}/progress`, `/reconcile`).
-- The `confirm_assignment` handler gains internal logic to set/clear `last_confirm_error_*` columns (§5.7); the **agent ↔ server contract is unchanged** — same request shape, same response codes.
+- The `confirm_asset` handler gains internal logic to set/clear `last_confirm_error_*` columns (§5.7); the **agent ↔ server contract is unchanged** — same request shape, same response codes.
 - Auth tokens, secrets, deployment.
 - Existing `clients.last_seen` semantics (poll-only writes, §5.4).
 
@@ -365,7 +365,7 @@ Mirrors the agent's default; used by §5.3 and §5.4 thresholds.
 
 **Migration safety on SQLite WAL:** `ALTER TABLE … ADD COLUMN` with a nullable default is fast (metadata-only) and takes a brief schema-modification lock. The Swarm deploy pattern already restarts the server container per deploy (Gitea Actions stack updates); migration runs in the entrypoint's `alembic upgrade head` before the FastAPI app binds. No special operator step required beyond the existing deploy flow.
 
-`bytes_downloaded_updated_at` is set in `update_assignment_progress` per §5.3 rules. `last_confirm_error_at` and `last_confirm_error_reason` are set/cleared in `confirm_assignment` per §5.7.
+`bytes_downloaded_updated_at` is set in `update_assignment_progress` per §5.3 rules. `last_confirm_error_at` and `last_confirm_error_reason` are set/cleared in `confirm_asset` per §5.7.
 
 ## 7. UI
 
@@ -475,7 +475,7 @@ Cover §5.3 update rules for `update_assignment_progress`. Each test asserts bot
 - `bytes_downloaded > asset.size_bytes` → accepted; subsequent projection treats as verifying.
 - A second strictly-increasing post produces a second `RateSample` in the tracker.
 
-Plus new tests for §5.7 in `confirm_assignment`:
+Plus new tests for §5.7 in `confirm_asset`:
 
 - Confirm with checksum mismatch → assignment not delivered; `last_confirm_error_at = now`; `last_confirm_error_reason = "checksum_mismatch"`.
 - Confirm with size mismatch (passthrough) → same shape; reason `"size_mismatch"`.

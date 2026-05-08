@@ -91,6 +91,9 @@ class Assignment(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     evict_requested_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     bytes_downloaded: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bytes_downloaded_updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    last_confirm_error_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    last_confirm_error_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     client: Mapped[Client] = relationship(back_populates="assignments")
     asset: Mapped[Asset] = relationship(back_populates="assignments")
