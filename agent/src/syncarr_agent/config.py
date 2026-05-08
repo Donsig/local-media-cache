@@ -16,12 +16,14 @@ class Config:
     aria2_host: str = "127.0.0.1"
     aria2_port: int = 6800
     aria2_secret: str = ""
+    state_db_path: Path | None = None  # defaults to library_root/.syncarr/state.db
 
 
 def load(path: Path) -> Config:
     """Load config from a TOML file at *path*."""
     with open(path, "rb") as f:
         data = tomllib.load(f)
+    raw_state_db = data.get("state_db_path")
     return Config(
         server_url=data["server_url"].rstrip("/"),
         token=data["token"],
@@ -30,4 +32,5 @@ def load(path: Path) -> Config:
         aria2_host=str(data.get("aria2_host", "127.0.0.1")),
         aria2_port=int(data.get("aria2_port", 6800)),
         aria2_secret=str(data.get("aria2_secret", "")),
+        state_db_path=Path(raw_state_db) if raw_state_db else None,
     )

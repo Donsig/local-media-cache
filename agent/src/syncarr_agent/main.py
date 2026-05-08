@@ -19,7 +19,8 @@ RECONCILE_INTERVAL_SECONDS = 24 * 3600
 
 def run(config_path: Path) -> None:
     config = load(config_path)
-    state_db_path = config.library_root / ".syncarr" / "state.db"
+    state_db_path = config.state_db_path or config.library_root / ".syncarr" / "state.db"
+    state_db_path.parent.mkdir(parents=True, exist_ok=True)
     state = StateDB(state_db_path)
     server = ServerClient(config.server_url, config.token)
     aria2 = Aria2Client(config.aria2_host, config.aria2_port, config.aria2_secret)
