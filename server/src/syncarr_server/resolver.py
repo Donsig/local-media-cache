@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 from datetime import UTC, datetime
@@ -16,8 +15,15 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-async def gc_orphaned_assets(session: AsyncSession) -> None:
-    # Collect cache_path values before deleting rows so we can clean up files.
+def delete_cache_files(paths: list[str]) -> None:
+    """Unlink cache files; called after DB commit to ensure DB-first ordering."""
+    for path in paths:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+
+
+async def gc_orphaned_assets(session: AsyncSession) -> list[str]:
+    """Delete orphaned asset DB rows and return cache paths to delete after commit."""
     orphan_rows = list(
         (
             await session.execute(
@@ -26,21 +32,12 @@ async def gc_orphaned_assets(session: AsyncSession) -> None:
         ).scalars()
     )
     await session.execute(delete(Asset).where(~Asset.assignments.any()))
-
-    # Delete any cache files outside the DB transaction — skip NULL (passthrough assets).
-    paths_to_delete = [p for p in orphan_rows if p is not None]
-    if paths_to_delete:
-
-        def _unlink_files(paths: list[str]) -> None:
-            for path in paths:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(path)
-
-        await asyncio.to_thread(_unlink_files, paths_to_delete)
+    return [path for path in orphan_rows if path is not None]
 
 
 async def resolve_all_subscriptions(provider: MediaProvider, session: AsyncSession) -> None:
     now = _utc_now()
+    paths_to_delete: list[str] = []
 
     async with session.begin():
         subscriptions = list((await session.execute(select(Subscription))).scalars())
@@ -124,10 +121,12 @@ async def resolve_all_subscriptions(provider: MediaProvider, session: AsyncSessi
                 assignment.state = "evict"
                 assignment.evict_requested_at = now
 
-        await gc_orphaned_assets(session)
+        paths_to_delete = await gc_orphaned_assets(session)
         await session.execute(
             delete(Client).where(
                 Client.decommissioning.is_(True),
                 ~Client.assignments.any(),
             ),
         )
+
+    delete_cache_files(paths_to_delete)

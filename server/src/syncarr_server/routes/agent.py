@@ -13,7 +13,7 @@ from syncarr_server.auth import require_agent_auth
 from syncarr_server.config import Settings, get_settings
 from syncarr_server.db import get_session
 from syncarr_server.models import Asset, Assignment, Client
-from syncarr_server.resolver import gc_orphaned_assets
+from syncarr_server.resolver import delete_cache_files, gc_orphaned_assets
 from syncarr_server.schemas import (
     AgentAssignmentSchema,
     AgentAssignmentsResponse,
@@ -240,8 +240,9 @@ async def confirm_asset(
                 detail="Assignment is not pending eviction",
             )
         await session.delete(assignment)
-        await gc_orphaned_assets(session)
+        paths_to_delete = await gc_orphaned_assets(session)
         await session.commit()
+        delete_cache_files(paths_to_delete)
         return AgentConfirmResponse(ok=True)
 
     if assignment_asset is None:
