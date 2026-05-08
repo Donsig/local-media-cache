@@ -1,0 +1,58 @@
+TASK: Critical review of the design spec at docs/superpowers/specs/2026-05-08-pipeline-status-redesign-design.md in this repo.
+
+CONTEXT — the spec proposes:
+- A new pure server-side projection function `pipeline.project(asset, assignment, client, *, now, poll_interval_seconds)` that combines Asset.status (server cache state) + Assignment.state (per-client delivery state) + bytes_downloaded + evict signals + stalled detection + agent-offline detection into a single pipeline_status enum (queue | transferring | ready | failed) plus a finer pipeline_substate.
+- A new GET /api/queue endpoint returning per-(asset, client) rows.
+- A breaking field rename on GET /api/clients/{id}/assignments (state -> pipeline_status), routing through the same projection.
+- Two new timestamp columns (assignments.bytes_downloaded_updated_at, clients.last_poll_at) — single Alembic migration.
+- UI rewrite of QueueScreen and LibraryScreen pills to consume the new shape.
+
+READ-ONLY CONTEXT to load before reviewing:
+- docs/superpowers/specs/2026-05-08-pipeline-status-redesign-design.md (the spec)
+- server/src/syncarr_server/models.py
+- server/src/syncarr_server/routes/ui.py
+- server/src/syncarr_server/routes/agent.py
+- server/src/syncarr_server/schemas.py
+- server/src/syncarr_server/transcoder.py
+- server/src/syncarr_server/resolver.py
+- ui/src/screens/QueueScreen.tsx
+- ui/src/screens/LibraryScreen.tsx
+- docs/DOMAIN.md, docs/API.md, docs/DECISIONS.md, docs/ARCHITECTURE.md
+
+REVIEW FOCUS — produce a critique covering:
+1. CORRECTNESS of the truth table (spec §5.2). Are there real state combinations the table misses or handles wrongly given the actual SQLAlchemy models? Any race conditions between an agent confirm POST and a projection read?
+2. COMPLETENESS. Edge cases the spec does not address — at minimum: client decommissioning, subscription deletion mid-transfer, multi-profile assets (one media item with two profiles -> two assets), passthrough sha256=None semantics (recent bug #33), evict_requested_at after delivered, asset.status=ready but cache_path missing, pipeline_substate values that aren't reachable, etc.
+3. API DESIGN. Is GET /api/queue the right shape? Is the breaking field rename on /api/clients/{id}/assignments justified vs. additive? Query param ergonomics (multi-value status filter)?
+4. SCHEMA. Are bytes_downloaded_updated_at and last_poll_at the right columns / right tables? Migration safety on a live SQLite WAL DB? Should there be a server-restart resilience story for the in-memory transfer-rate sample buffer (spec §5.5)?
+5. TESTING ADEQUACY. Gaps in spec §8 truth-table coverage. Concurrency / time-pinning tests. Integration coverage of the assignment-update -> bytes_downloaded_updated_at writer path.
+6. CONFLICTS with existing ADRs in docs/DECISIONS.md or invariants in docs/DOMAIN.md / docs/ARCHITECTURE.md.
+7. INTERNAL CONTRADICTIONS in the spec itself.
+8. MISSING operator-relevant pipeline conditions beyond stalled / agent-offline / transfer-rate (the spec already deferred aria2 backpressure to backlog).
+
+OUTPUT: Write the review as a NEW markdown file at docs/superpowers/specs/2026-05-08-pipeline-status-redesign-review-codex.md. Structure exactly:
+
+# Codex Review — Pipeline Status Redesign Spec
+
+## TL;DR
+3–5 sentence verdict: ship as-is / ship with changes / needs significant rework.
+
+## BLOCKERS
+Numbered. Issues that MUST be fixed before implementation. Reference spec §N and code paths.
+
+## IMPROVEMENTS
+Numbered. Should be fixed but not blockers.
+
+## NITS
+Numbered. Style, wording, minor inconsistencies.
+
+## QUESTIONS
+Numbered. Anything genuinely ambiguous to you.
+
+CONSTRAINTS:
+- Be specific. Reference spec section numbers and file paths in the codebase.
+- Do NOT modify the spec or any other file.
+- Do NOT make implementation changes.
+- Do NOT add scaffolding code.
+- The ONLY file you create is the review markdown.
+
+DONE MEANS: docs/superpowers/specs/2026-05-08-pipeline-status-redesign-review-codex.md exists and contains the structured critique above.
