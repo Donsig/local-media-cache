@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.models import Asset, Assignment, Client, Profile
@@ -901,7 +901,7 @@ async def test_confirm_passthrough_rejects_wrong_size(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
-    assert data["reason"] == "checksum_mismatch"
+    assert data["reason"] == "size_mismatch"
 
 
 async def test_confirm_passthrough_accepts_correct_size(
@@ -925,3 +925,216 @@ async def test_confirm_passthrough_accepts_correct_size(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
+
+
+async def _create_ready_asset_and_assignment(
+    session: AsyncSession,
+    client_id: str = "test-agent",
+    asset_id: int = 99,
+) -> None:
+    from datetime import UTC, datetime
+
+    from syncarr_server.models import Asset, Assignment
+
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    asset = Asset()
+    asset.id = asset_id
+    asset.source_media_id = f"m{asset_id}"
+    asset.profile_id = "profile-1"
+    asset.source_path = "/mnt/media/movie.mkv"
+    asset.size_bytes = 1_000_000
+    asset.sha256 = "abc"
+    asset.status = "ready"
+    asset.status_detail = None
+    asset.created_at = now
+    asset.ready_at = now
+    asset.cache_path = None
+    session.add(asset)
+    assignment = Assignment()
+    assignment.client_id = client_id
+    assignment.asset_id = asset_id
+    assignment.state = "pending"
+    assignment.created_at = now
+    assignment.delivered_at = None
+    assignment.evict_requested_at = None
+    assignment.bytes_downloaded = None
+    assignment.bytes_downloaded_updated_at = None
+    assignment.last_confirm_error_at = None
+    assignment.last_confirm_error_reason = None
+    session.add(assignment)
+    await session.commit()
+
+
+async def test_progress_strictly_increasing_updates_value_and_timestamp(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+
+    response = await http_client.patch(
+        "/assignments/99/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 500_000},
+    )
+
+    assert response.status_code == 204
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assignment = result.scalar_one()
+    assert assignment.bytes_downloaded == 500_000
+    assert assignment.bytes_downloaded_updated_at is not None
+
+
+async def test_progress_equal_value_no_timestamp_advance(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    from datetime import UTC, datetime
+
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+    fixed_ts = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
+    await db_session.execute(
+        update(Assignment)
+        .where(Assignment.asset_id == 99)
+        .values(bytes_downloaded=300_000, bytes_downloaded_updated_at=fixed_ts),
+    )
+    await db_session.commit()
+
+    response = await http_client.patch(
+        "/assignments/99/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 300_000},
+    )
+
+    assert response.status_code == 204
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assignment = result.scalar_one()
+    assert assignment.bytes_downloaded == 300_000
+    assert assignment.bytes_downloaded_updated_at == fixed_ts.replace(tzinfo=None)
+
+
+async def test_progress_decreasing_value_not_stored(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+    await db_session.execute(
+        update(Assignment).where(Assignment.asset_id == 99).values(bytes_downloaded=500_000),
+    )
+    await db_session.commit()
+
+    response = await http_client.patch(
+        "/assignments/99/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 200_000},
+    )
+
+    assert response.status_code == 204
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assert result.scalar_one().bytes_downloaded == 500_000
+
+
+async def test_progress_negative_returns_422(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+
+    response = await http_client.patch(
+        "/assignments/99/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": -1},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_confirm_checksum_mismatch_records_error(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+
+    response = await http_client.post(
+        "/confirm/99",
+        headers=auth_headers_agent,
+        json={"state": "delivered", "actual_sha256": "wrong", "actual_size_bytes": 1_000_000},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assignment = result.scalar_one()
+    assert assignment.last_confirm_error_at is not None
+    assert assignment.last_confirm_error_reason == "checksum_mismatch"
+    assert assignment.state == "pending"
+
+
+async def test_confirm_size_mismatch_passthrough_records_size_mismatch(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+    await db_session.execute(update(Asset).where(Asset.id == 99).values(sha256=None))
+    await db_session.commit()
+
+    response = await http_client.post(
+        "/confirm/99",
+        headers=auth_headers_agent,
+        json={"state": "delivered", "actual_sha256": None, "actual_size_bytes": 999_999},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assert result.scalar_one().last_confirm_error_reason == "size_mismatch"
+
+
+async def test_confirm_success_clears_error_columns(
+    http_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    from datetime import UTC, datetime
+
+    await _ensure_profile(db_session)
+    await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
+    await db_session.execute(
+        update(Assignment).where(Assignment.asset_id == 99).values(
+            last_confirm_error_at=datetime(2026, 1, 1, tzinfo=UTC),
+            last_confirm_error_reason="checksum_mismatch",
+        ),
+    )
+    await db_session.commit()
+
+    response = await http_client.post(
+        "/confirm/99",
+        headers=auth_headers_agent,
+        json={"state": "delivered", "actual_sha256": "abc", "actual_size_bytes": 1_000_000},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    result = await db_session.execute(select(Assignment).where(Assignment.asset_id == 99))
+    assignment = result.scalar_one()
+    assert assignment.state == "delivered"
+    assert assignment.last_confirm_error_at is None
+    assert assignment.last_confirm_error_reason is None

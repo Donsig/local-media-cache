@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select, update
@@ -13,6 +14,7 @@ from syncarr_server.auth import require_agent_auth
 from syncarr_server.config import Settings, get_settings
 from syncarr_server.db import get_session
 from syncarr_server.models import Asset, Assignment, Client
+from syncarr_server.pipeline import RateSample
 from syncarr_server.resolver import delete_cache_files, gc_orphaned_assets
 from syncarr_server.schemas import (
     AgentAssignmentSchema,
@@ -25,6 +27,7 @@ from syncarr_server.schemas import (
     ReconcileRequest,
     ReconcileResponse,
 )
+from syncarr_server.services.rate_tracker import rate_tracker
 
 router = APIRouter(tags=["agent"])
 
@@ -228,13 +231,34 @@ async def update_assignment_progress(
     client: Annotated[Client, Depends(require_agent_auth)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    logger = structlog.get_logger()
     assignment_asset = await _get_assignment_asset(session, client.id, asset_id)
     if assignment_asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     assignment, _asset = assignment_asset
     if assignment.state not in ("pending",):
         return
-    assignment.bytes_downloaded = payload.bytes_downloaded
+
+    new_bytes = payload.bytes_downloaded
+    current = assignment.bytes_downloaded or 0
+    now = datetime.now(UTC)
+
+    if new_bytes > current:
+        assignment.bytes_downloaded = new_bytes
+        assignment.bytes_downloaded_updated_at = now
+        rate_tracker.record(
+            (client.id, asset_id),
+            RateSample(at=now, bytes_downloaded=new_bytes),
+        )
+    elif new_bytes < current:
+        logger.warning(
+            "bytes_downloaded_decreased",
+            client_id=client.id,
+            asset_id=asset_id,
+            current=current,
+            received=new_bytes,
+        )
+
     await session.commit()
 
 
@@ -284,24 +308,35 @@ async def confirm_asset(
             detail="Asset is not ready for delivery confirmation",
         )
 
-    # For passthrough assets sha256=None; skip hash check but still verify size.
+    now = datetime.now(UTC)
+
+    # sha256-based check for transcoded assets
     if asset.sha256 is not None:
         if payload.actual_sha256 != asset.sha256 or payload.actual_size_bytes != asset.size_bytes:
+            assignment.last_confirm_error_at = now
+            assignment.last_confirm_error_reason = "checksum_mismatch"
+            await session.commit()
             return AgentConfirmResponse(
                 ok=False,
                 reason="checksum_mismatch",
                 expected_sha256=asset.sha256,
                 actual_sha256=payload.actual_sha256,
             )
+    # size-only check for passthrough assets (sha256=None)
     elif asset.size_bytes is not None and payload.actual_size_bytes != asset.size_bytes:
+        assignment.last_confirm_error_at = now
+        assignment.last_confirm_error_reason = "size_mismatch"
+        await session.commit()
         return AgentConfirmResponse(
             ok=False,
-            reason="checksum_mismatch",
+            reason="size_mismatch",
             expected_sha256=None,
             actual_sha256=payload.actual_sha256,
         )
 
     assignment.state = "delivered"
-    assignment.delivered_at = _utc_now()
+    assignment.delivered_at = now
+    assignment.last_confirm_error_at = None
+    assignment.last_confirm_error_reason = None
     await session.commit()
     return AgentConfirmResponse(ok=True)

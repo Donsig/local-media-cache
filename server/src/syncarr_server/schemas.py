@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Schema(BaseModel):
@@ -174,7 +174,7 @@ class AssetStatusSchema(Schema):
 
 AgentAssignmentState = Literal["queued", "ready", "evict"]
 AgentConfirmState = Literal["delivered", "evicted"]
-AgentConfirmMismatchReason = Literal["checksum_mismatch"]
+AgentConfirmMismatchReason = Literal["checksum_mismatch", "size_mismatch"]
 
 
 class ClientAssignmentSchema(Schema):
@@ -213,7 +213,7 @@ class AgentConfirmRequest(Schema):
 
 
 class AgentProgressRequest(Schema):
-    bytes_downloaded: int
+    bytes_downloaded: int = Field(..., ge=0)
 
 
 class AgentConfirmResponse(Schema):
