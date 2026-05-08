@@ -3,15 +3,17 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.auth import require_ui_auth
+from syncarr_server.config import get_settings
 from syncarr_server.db import get_session
 from syncarr_server.models import Asset, Assignment, Client, Profile, Subscription
+from syncarr_server.pipeline import project
 from syncarr_server.providers.base import MediaProvider
 from syncarr_server.resolver import resolve_all_subscriptions
 from syncarr_server.routes.agent import _effective_state
@@ -23,6 +25,8 @@ from syncarr_server.schemas import (
     ClientSchema,
     ClientsResponse,
     ClientUpdateRequest,
+    QueueResponse,
+    QueueRowSchema,
     ProfileCreateRequest,
     ProfileSchema,
     ProfilesResponse,
@@ -34,8 +38,16 @@ from syncarr_server.schemas import (
     SubscriptionUpdateRequest,
     validate_subscription_scope,
 )
+from syncarr_server.services.rate_tracker import rate_tracker
 
 router = APIRouter(tags=["ui"])
+
+_PIPELINE_SORT_ORDER: dict[str, int] = {
+    "transferring": 0,
+    "queued": 1,
+    "failed": 2,
+    "ready": 3,
+}
 
 
 def _utc_now() -> datetime:
@@ -481,6 +493,71 @@ async def delete_asset(
 
     await resolve_all_subscriptions(provider=_provider(request), session=session)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/queue",
+    response_model=QueueResponse,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def get_queue(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    status: Annotated[
+        list[Literal["queued", "transferring", "ready", "failed"]] | None,
+        Query(alias="status"),
+    ] = None,
+    client_id: str | None = None,
+) -> QueueResponse:
+    settings = get_settings()
+    now = datetime.now(UTC)
+
+    query = (
+        select(Assignment, Asset, Client)
+        .join(Asset, Assignment.asset_id == Asset.id)
+        .join(Client, Assignment.client_id == Client.id)
+        .order_by(Assignment.created_at.desc())
+    )
+    if client_id is not None:
+        query = query.where(Assignment.client_id == client_id)
+
+    result = await session.execute(query)
+
+    rows: list[QueueRowSchema] = []
+    for assignment, asset, client in result.all():
+        samples = rate_tracker.samples_for((client.id, asset.id))
+        p = project(
+            asset,
+            assignment,
+            client,
+            now=now,
+            poll_interval_seconds=settings.agent_poll_interval_seconds,
+            rate_samples=samples,
+        )
+        if not p.visible:
+            continue
+        if status is not None and p.status not in status:
+            continue
+        rows.append(
+            QueueRowSchema(
+                asset_id=asset.id,
+                client_id=client.id,
+                media_item_id=asset.source_media_id,
+                filename=Path(asset.source_path).name,
+                profile_id=asset.profile_id,
+                size_bytes=p.size_bytes,
+                bytes_downloaded=p.bytes_downloaded,
+                transfer_rate_bps=p.transfer_rate_bps,
+                eta_seconds=p.eta_seconds,
+                pipeline_status=p.status,
+                pipeline_substate=p.substate,
+                pipeline_detail=p.detail,
+                delivered_at=assignment.delivered_at,
+                created_at=assignment.created_at,
+            )
+        )
+
+    rows.sort(key=lambda row: _PIPELINE_SORT_ORDER.get(row.pipeline_status, 99))
+    return QueueResponse(rows=rows)
 
 
 @router.get(

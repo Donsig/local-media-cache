@@ -231,3 +231,24 @@ class ReconcileRequest(Schema):
 class ReconcileResponse(Schema):
     orphans_to_delete: list[int]
     missing_to_redownload: list[int]
+
+
+class QueueRowSchema(Schema):
+    asset_id: int
+    client_id: str
+    media_item_id: str
+    filename: str
+    profile_id: str
+    size_bytes: int | None
+    bytes_downloaded: int | None
+    transfer_rate_bps: float | None
+    eta_seconds: float | None
+    pipeline_status: str
+    pipeline_substate: str | None
+    pipeline_detail: str | None
+    delivered_at: datetime | None
+    created_at: datetime
+
+
+class QueueResponse(Schema):
+    rows: list[QueueRowSchema]
