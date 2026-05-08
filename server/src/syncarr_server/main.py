@@ -64,6 +64,11 @@ async def _seed_default_profiles() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    if not settings.ui_token:
+        raise ValueError(
+            "UI_TOKEN is not set. The server refuses to start without authentication. "
+            "Set the UI_TOKEN environment variable or provide it via Docker secrets."
+        )
     worker = TranscodeWorker(AsyncSessionLocal, settings)
     passthrough_worker = PassthroughWorker(AsyncSessionLocal, settings)
     app.state.media_provider = None
