@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import aria2p
 import pytest
 
-import aria2p
 from syncarr_agent.aria2_client import Aria2Client, DownloadStatus
 
 
@@ -26,7 +26,7 @@ def test_constructor_normalizes_bare_host_to_http(
     mock_client_cls: MagicMock, mock_api_cls: MagicMock
 ) -> None:
     Aria2Client("127.0.0.1", 6800, "")
-    mock_client_cls.assert_called_once_with(host="http://127.0.0.1", port=6800, secret=None)
+    mock_client_cls.assert_called_once_with(host="http://127.0.0.1", port=6800, secret="")
 
 
 @patch("syncarr_agent.aria2_client.aria2p.API")
@@ -35,7 +35,7 @@ def test_constructor_preserves_existing_scheme(
     mock_client_cls: MagicMock, mock_api_cls: MagicMock
 ) -> None:
     Aria2Client("http://localhost", 6800, "")
-    mock_client_cls.assert_called_once_with(host="http://localhost", port=6800, secret=None)
+    mock_client_cls.assert_called_once_with(host="http://localhost", port=6800, secret="")
 
 
 @patch("syncarr_agent.aria2_client.aria2p.API")

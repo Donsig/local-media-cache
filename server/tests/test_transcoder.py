@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -391,7 +389,7 @@ async def test_passthrough_asset_skips_ffmpeg(
     assert mock_ffmpeg.calls == []
     assert asset.status == "ready"
     assert asset.cache_path is None
-    assert asset.sha256 is None  # Bug #20: passthrough skips server-side hash; sha256=None by design
+    assert asset.sha256 is None  # Bug #20: passthrough skips server-side hash; sha256=None
     assert asset.size_bytes == len(source_bytes)
 
 

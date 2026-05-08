@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
-
 from sqlalchemy import JSON, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -251,7 +250,9 @@ class PassthroughWorker(_WorkerBase):
                 None, lambda: Path(source_path).stat().st_size
             )
         except Exception as exc:
-            structlog.get_logger().error("passthrough.stat_error", asset_id=asset_id, error=str(exc))
+            structlog.get_logger().error(
+                "passthrough.stat_error", asset_id=asset_id, error=str(exc)
+            )
             async with self._session_factory() as session:
                 await session.execute(
                     update(Asset)

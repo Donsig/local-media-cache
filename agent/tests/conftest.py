@@ -9,9 +9,8 @@ from typing import Any
 import pytest
 
 from syncarr_agent.aria2_client import DownloadInfo, DownloadStatus
-from syncarr_agent.client import AssignmentItem, AssignmentsResponse, AssignmentsStats
+from syncarr_agent.client import AssignmentsResponse, AssignmentsStats
 from syncarr_agent.state import DownloadRecord
-
 
 # ---------------------------------------------------------------------------
 # Mock ServerClient

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import aria2p
 
 
-class DownloadStatus(str, Enum):
+class DownloadStatus(StrEnum):
     ACTIVE = "active"
     WAITING = "waiting"  # queued behind max-concurrent-downloads=1 — treat as in-progress
     COMPLETE = "complete"
@@ -45,7 +45,7 @@ class Aria2Client:
         rpc_client = aria2p.Client(
             host=host,
             port=port,
-            secret=secret or None,
+            secret=secret or "",
         )
         self._api = aria2p.API(rpc_client)
 
