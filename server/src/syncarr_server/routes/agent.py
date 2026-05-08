@@ -284,14 +284,20 @@ async def confirm_asset(
             detail="Asset is not ready for delivery confirmation",
         )
 
-    # Skip verification for passthrough assets (sha256=None means no server-side hash was computed).
-    if asset.sha256 is not None and (
-        payload.actual_sha256 != asset.sha256 or payload.actual_size_bytes != asset.size_bytes
-    ):
+    # For passthrough assets sha256=None; skip hash check but still verify size.
+    if asset.sha256 is not None:
+        if payload.actual_sha256 != asset.sha256 or payload.actual_size_bytes != asset.size_bytes:
+            return AgentConfirmResponse(
+                ok=False,
+                reason="checksum_mismatch",
+                expected_sha256=asset.sha256,
+                actual_sha256=payload.actual_sha256,
+            )
+    elif asset.size_bytes is not None and payload.actual_size_bytes != asset.size_bytes:
         return AgentConfirmResponse(
             ok=False,
             reason="checksum_mismatch",
-            expected_sha256=asset.sha256,
+            expected_sha256=None,
             actual_sha256=payload.actual_sha256,
         )
 

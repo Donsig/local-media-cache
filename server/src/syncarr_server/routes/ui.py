@@ -222,18 +222,17 @@ async def list_client_assignments(
     await _get_client(session, client_id)
 
     ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
-    if not ids:
-        return []
 
-    result = await session.execute(
+    query = (
         select(Assignment, Asset)
         .join(Asset, Assignment.asset_id == Asset.id)
-        .where(
-            Assignment.client_id == client_id,
-            Asset.source_media_id.in_(ids),
-        )
-        .order_by(Assignment.created_at, Assignment.asset_id),
+        .where(Assignment.client_id == client_id)
+        .order_by(Assignment.created_at, Assignment.asset_id)
     )
+    if ids:
+        query = query.where(Asset.source_media_id.in_(ids))
+
+    result = await session.execute(query)
 
     assignments: list[ClientAssignmentSchema] = []
     for assignment, asset in result.all():
@@ -492,6 +491,7 @@ async def delete_asset(
 async def list_assets(
     session: Annotated[AsyncSession, Depends(get_session)],
     media_item_ids: str = "",
+    status: str = "",
 ) -> list[AssetStatusSchema]:
     from sqlalchemy import func
 
@@ -512,6 +512,8 @@ async def list_assets(
     )
     if ids:
         query = query.where(Asset.source_media_id.in_(ids))
+    if status:
+        query = query.where(Asset.status == status)
     rows = list((await session.execute(query)).all())
     return [
         AssetStatusSchema(

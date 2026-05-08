@@ -841,3 +841,87 @@ async def test_reconcile_agent_scoped(
     assert assignment_b is not None
     assert assignment_b.state == "delivered"
     assert assignment_b.delivered_at is not None
+
+
+async def _create_passthrough_null_sha256(
+    session: AsyncSession,
+    client_id: str,
+    files: AgentTestFiles,
+    size_bytes: int = 1_000_000,
+) -> int:
+    """Create a passthrough asset where sha256=None (production behavior after bug #20)."""
+    await _ensure_profile(session)
+    now = datetime.now(UTC)
+    asset = Asset(
+        source_media_id="media-passthrough",
+        profile_id="profile-1",
+        source_path=str(files.source_path),
+        cache_path=None,
+        size_bytes=size_bytes,
+        sha256=None,
+        status="ready",
+        status_detail=None,
+        created_at=now,
+        ready_at=now,
+    )
+    session.add(asset)
+    await session.flush()
+    session.add(
+        Assignment(
+            client_id=client_id,
+            asset_id=asset.id,
+            state="pending",
+            created_at=now,
+            delivered_at=None,
+            evict_requested_at=None,
+        )
+    )
+    await session.commit()
+    return asset.id
+
+
+async def test_confirm_passthrough_rejects_wrong_size(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Passthrough assets (sha256=None) still fail confirm when size_bytes doesn't match (bug #33)."""
+    asset_id = await _create_passthrough_null_sha256(
+        db_session, agent_client.id, agent_test_files, size_bytes=1_000_000
+    )
+
+    response = await http_client.post(
+        f"/confirm/{asset_id}",
+        headers=auth_headers_agent,
+        json={"state": "delivered", "actual_sha256": None, "actual_size_bytes": 999_999},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["reason"] == "checksum_mismatch"
+
+
+async def test_confirm_passthrough_accepts_correct_size(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Passthrough assets (sha256=None) confirm successfully when size matches (bug #33)."""
+    asset_id = await _create_passthrough_null_sha256(
+        db_session, agent_client.id, agent_test_files, size_bytes=1_000_000
+    )
+
+    response = await http_client.post(
+        f"/confirm/{asset_id}",
+        headers=auth_headers_agent,
+        json={"state": "delivered", "actual_sha256": None, "actual_size_bytes": 1_000_000},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True

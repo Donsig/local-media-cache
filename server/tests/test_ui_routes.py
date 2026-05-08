@@ -547,3 +547,92 @@ async def test_get_assets_includes_bytes_downloaded(
     data = response.json()
     assert len(data) == 1
     assert data[0]["bytes_downloaded"] == 42_000
+
+
+async def test_list_client_assignments_no_filter_returns_all(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    """GET /clients/{id}/assignments without media_item_ids returns all assignments (bug #36)."""
+    await _create_client(http_client, auth_headers_ui, "c-nofilter")
+    await _create_profile(http_client, auth_headers_ui, "p-nofilter")
+
+    profile = await db_session.get(Profile, "p-nofilter")
+    assert profile is not None
+
+    for i in range(3):
+        asset = Asset(
+            source_media_id=f"ep-nf-{i}",
+            profile_id="p-nofilter",
+            source_path=f"/mnt/media/ep{i}.mkv",
+            cache_path=None,
+            size_bytes=None,
+            sha256=None,
+            status="queued",
+            status_detail=None,
+            created_at=datetime.now(UTC),
+            ready_at=None,
+        )
+        db_session.add(asset)
+        await db_session.flush()
+        db_session.add(
+            Assignment(
+                client_id="c-nofilter",
+                asset_id=asset.id,
+                state="pending",
+                created_at=datetime.now(UTC),
+                delivered_at=None,
+                evict_requested_at=None,
+            )
+        )
+    await db_session.commit()
+
+    response = await http_client.get(
+        "/clients/c-nofilter/assignments",
+        headers=auth_headers_ui,
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+
+
+async def test_list_assets_status_filter(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    """GET /assets?status=ready filters by status (bug #41)."""
+    profile = Profile(
+        id="p-statusfilter",
+        name="Status Filter",
+        ffmpeg_args=None,
+        target_size_bytes=None,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(profile)
+    await db_session.flush()
+
+    for status_val in ("ready", "queued", "failed"):
+        db_session.add(
+            Asset(
+                source_media_id=f"ep-sf-{status_val}",
+                profile_id="p-statusfilter",
+                source_path=f"/mnt/media/{status_val}.mkv",
+                cache_path=None,
+                size_bytes=None,
+                sha256=None,
+                status=status_val,
+                status_detail=None,
+                created_at=datetime.now(UTC),
+                ready_at=None,
+            )
+        )
+    await db_session.commit()
+
+    response = await http_client.get("/assets?status=ready", headers=auth_headers_ui)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "ready"
