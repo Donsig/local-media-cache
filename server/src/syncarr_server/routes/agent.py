@@ -161,6 +161,11 @@ async def download_asset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
     _assignment, asset = assignment_asset
+    if _assignment.evict_requested_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Assignment is pending eviction",
+        )
     if asset.status != "ready":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
@@ -229,6 +234,11 @@ async def confirm_asset(
         if assignment_asset is None:
             return AgentConfirmResponse(ok=True)
         assignment, _asset = assignment_asset
+        if assignment.evict_requested_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Assignment is not pending eviction",
+            )
         await session.delete(assignment)
         await gc_orphaned_assets(session)
         await session.commit()
@@ -245,6 +255,11 @@ async def confirm_asset(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Assignment is pending eviction; confirm evicted instead",
+        )
+    if asset.status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Asset is not ready for delivery confirmation",
         )
 
     # Skip verification for passthrough assets (sha256=None means no server-side hash was computed).

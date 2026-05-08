@@ -376,6 +376,27 @@ async def test_download_404_for_non_ready(
     assert response.status_code == 404
 
 
+async def test_download_returns_410_for_evicted_assignment(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Download of an assignment in evict state must return 410 Gone."""
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=agent_client.id,
+        files=agent_test_files,
+        asset_status="ready",
+        assignment_state="evict",
+    )
+
+    response = await http_client.get(f"/download/{asset_id}", headers=auth_headers_agent)
+
+    assert response.status_code == 410
+
+
 async def test_confirm_delivered_success(
     http_client: AsyncClient,
     auth_headers_agent: dict[str, str],
@@ -446,6 +467,40 @@ async def test_confirm_delivered_sha256_mismatch(
     assert assignment.state == "pending"
 
 
+async def test_confirm_delivered_rejects_non_ready_asset(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Delivery confirm on a queued asset must be rejected with 409."""
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        asset_status="queued",
+        assignment_state="pending",
+    )
+
+    response = await http_client.post(
+        f"/confirm/{asset_id}",
+        headers=auth_headers_agent,
+        json={
+            "state": "delivered",
+            "actual_sha256": "any-sha256",
+            "actual_size_bytes": 0,
+        },
+    )
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+
+    assert response.status_code == 409
+    assert assignment is not None
+    assert assignment.state == "pending"
+
+
 async def test_confirm_evicted(
     http_client: AsyncClient,
     auth_headers_agent: dict[str, str],
@@ -474,6 +529,35 @@ async def test_confirm_evicted(
     assert response.json() == {"ok": True}
     assert assignment is None
     assert asset is None
+
+
+async def test_confirm_evicted_rejects_non_evict_assignment(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Evict-confirm on a pending assignment must be rejected with 409."""
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        assignment_state="pending",
+    )
+
+    response = await http_client.post(
+        f"/confirm/{asset_id}",
+        headers=auth_headers_agent,
+        json={"state": "evicted"},
+    )
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+
+    assert response.status_code == 409
+    assert assignment is not None
+    assert assignment.state == "pending"
 
 
 async def test_confirm_is_idempotent(
