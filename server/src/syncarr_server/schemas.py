@@ -180,6 +180,11 @@ AgentConfirmMismatchReason = Literal["checksum_mismatch", "size_mismatch"]
 class ClientAssignmentSchema(Schema):
     media_item_id: str
     state: AgentAssignmentState
+    asset_id: int | None = None
+    profile_id: str | None = None
+    pipeline_status: str | None = None
+    pipeline_substate: str | None = None
+    pipeline_detail: str | None = None
 
 
 class AgentAssignmentSchema(Schema):

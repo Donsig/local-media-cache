@@ -16,7 +16,6 @@ from syncarr_server.models import Asset, Assignment, Client, Profile, Subscripti
 from syncarr_server.pipeline import project
 from syncarr_server.providers.base import MediaProvider
 from syncarr_server.resolver import resolve_all_subscriptions
-from syncarr_server.routes.agent import _effective_state
 from syncarr_server.schemas import (
     AssetStatusSchema,
     ClientAssignmentSchema,
@@ -224,6 +223,7 @@ async def delete_client(
 @router.get(
     "/clients/{client_id}/assignments",
     response_model=list[ClientAssignmentSchema],
+    response_model_exclude_none=True,
     dependencies=[Depends(require_ui_auth)],
 )
 async def list_client_assignments(
@@ -231,7 +231,9 @@ async def list_client_assignments(
     session: Annotated[AsyncSession, Depends(get_session)],
     media_item_ids: str = "",
 ) -> list[ClientAssignmentSchema]:
-    await _get_client(session, client_id)
+    client = await _get_client(session, client_id)
+    settings = get_settings()
+    now = datetime.now(UTC)
 
     ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
 
@@ -248,24 +250,34 @@ async def list_client_assignments(
 
     assignments: list[ClientAssignmentSchema] = []
     for assignment, asset in result.all():
-        effective_state = _effective_state(assignment, asset)
-        if effective_state is None:
-            if assignment.state != "delivered":
-                continue
-            # Delivered = file confirmed on satellite; show as "ready" in UI.
-            # Separate append avoids mypy strict narrowing complaint
-            # (None -> Literal reassignment).
+        samples = rate_tracker.samples_for((client.id, asset.id))
+        p = project(
+            asset,
+            assignment,
+            client,
+            now=now,
+            poll_interval_seconds=settings.agent_poll_interval_seconds,
+            rate_samples=samples,
+        )
+        if not p.visible:
+            continue
+        if ids:
             assignments.append(
                 ClientAssignmentSchema(
                     media_item_id=asset.source_media_id,
-                    state="ready",
+                    state="ready" if p.status == "ready" else "queued",
                 )
             )
             continue
         assignments.append(
             ClientAssignmentSchema(
                 media_item_id=asset.source_media_id,
-                state="queued" if effective_state == "ready" else effective_state,
+                state="ready" if p.status == "ready" else "queued",
+                asset_id=asset.id,
+                profile_id=asset.profile_id,
+                pipeline_status=p.status or "queued",
+                pipeline_substate=p.substate,
+                pipeline_detail=p.detail,
             )
         )
     return assignments
@@ -548,7 +560,7 @@ async def get_queue(
                 bytes_downloaded=p.bytes_downloaded,
                 transfer_rate_bps=p.transfer_rate_bps,
                 eta_seconds=p.eta_seconds,
-                pipeline_status=p.status,
+                pipeline_status=p.status or "queued",
                 pipeline_substate=p.substate,
                 pipeline_detail=p.detail,
                 delivered_at=assignment.delivered_at,

@@ -263,3 +263,59 @@ async def test_sort_transferring_before_queued_before_ready(
     statuses = [r["pipeline_status"] for r in resp.json()["rows"]]
     assert statuses.index("transferring") < statuses.index("queued")
     assert statuses.index("queued") < statuses.index("ready")
+
+
+async def test_client_assignments_new_fields_populated(
+    http_client: AsyncClient,
+    session: AsyncSession,
+    auth_headers_ui: dict[str, str],
+) -> None:
+    await _seed_profile(session)
+    await _seed_client(session)
+    await _seed_asset(session)
+    await _seed_assignment(session)
+    resp = await http_client.get("/clients/c1/assignments", headers=auth_headers_ui)
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert "asset_id" in row
+    assert "profile_id" in row
+    assert "pipeline_status" in row
+    assert "pipeline_substate" in row
+    assert "pipeline_detail" in row
+    assert "state" in row
+
+
+async def test_client_assignments_multi_profile_two_rows(
+    http_client: AsyncClient,
+    session: AsyncSession,
+    auth_headers_ui: dict[str, str],
+) -> None:
+    await _seed_profile(session, "p1")
+    await _seed_profile(session, "p2")
+    await _seed_client(session)
+    await _seed_asset(session, asset_id=1, profile_id="p1", source_media_id="m1")
+    await _seed_asset(session, asset_id=2, profile_id="p2", source_media_id="m1")
+    await _seed_assignment(session, asset_id=1)
+    await _seed_assignment(session, asset_id=2)
+    resp = await http_client.get("/clients/c1/assignments", headers=auth_headers_ui)
+    rows = resp.json()
+    assert len(rows) == 2
+    assert {r["profile_id"] for r in rows} == {"p1", "p2"}
+
+
+async def test_cross_projection_queue_matches_client_assignments(
+    http_client: AsyncClient,
+    session: AsyncSession,
+    auth_headers_ui: dict[str, str],
+) -> None:
+    await _seed_profile(session)
+    await _seed_client(session)
+    await _seed_asset(session)
+    await _seed_assignment(session, bytes_downloaded=300_000)
+    queue_resp = await http_client.get("/queue", headers=auth_headers_ui)
+    assign_resp = await http_client.get("/clients/c1/assignments", headers=auth_headers_ui)
+    queue_status = queue_resp.json()["rows"][0]["pipeline_status"]
+    assign_status = assign_resp.json()[0]["pipeline_status"]
+    assert queue_status == assign_status
