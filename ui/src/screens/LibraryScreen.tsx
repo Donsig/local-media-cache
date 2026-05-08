@@ -21,11 +21,10 @@ import { Badge } from '../components/Badge'
 import { Btn } from '../components/Btn'
 import { IcoChevR, IcoFilm, IcoSearch, IcoTV } from '../components/icons'
 import { SynInput } from '../components/SynInput'
-import type { Client, ClientAssignment, MediaItem, Profile } from '../types'
+import type { Client, ClientAssignment, MediaItem, PipelineStatus, Profile } from '../types'
 
 type BadgeColor = 'ready' | 'transcoding' | 'queued' | 'failed' | 'default'
-type AssignmentState = ClientAssignment['state']
-type ClientAssignmentStateMap = Map<string, Map<string, AssignmentState>>
+type ClientAssignmentMap = Map<string, Map<string, ClientAssignment>>
 
 function formatCount(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`
@@ -46,25 +45,26 @@ function statusToBadgeColor(status: string): BadgeColor {
   return 'default'
 }
 
-function episodePillClassName(state: AssignmentState | null): string {
-  if (state === 'ready') return 'sync-pill sync-pill--on'
-  if (state === 'queued' || state === 'evict') return 'sync-pill sync-pill--pending'
+function episodePillClassName(status: PipelineStatus | null): string {
+  if (status === 'ready') return 'sync-pill sync-pill--on'
+  if (status === 'transferring' || status === 'queued') return 'sync-pill sync-pill--pending'
+  if (status === 'failed') return 'sync-pill sync-pill--pending'
   return 'sync-pill'
 }
 
-function assignmentStateFor(
-  assignmentStateByClient: ClientAssignmentStateMap,
+function assignmentFor(
+  assignmentMap: ClientAssignmentMap,
   clientId: string,
   mediaItemId: string,
-): AssignmentState | null {
-  return assignmentStateByClient.get(clientId)?.get(mediaItemId) ?? null
+): ClientAssignment | null {
+  return assignmentMap.get(clientId)?.get(mediaItemId) ?? null
 }
 
 function useClientAssignmentMap(
   clients: Client[],
   mediaItemIds: string[],
   enabled: boolean,
-): ClientAssignmentStateMap {
+): ClientAssignmentMap {
   const queries = useQueries({
     queries: clients.map((client) => ({
       queryKey: ['clientAssignments', client.id, mediaItemIds],
@@ -75,11 +75,11 @@ function useClientAssignmentMap(
   })
 
   return useMemo(() => {
-    const map: ClientAssignmentStateMap = new Map()
+    const map: ClientAssignmentMap = new Map()
     for (const [index, client] of clients.entries()) {
-      const clientMap = new Map<string, AssignmentState>()
+      const clientMap = new Map<string, ClientAssignment>()
       for (const assignment of queries[index]?.data ?? []) {
-        clientMap.set(assignment.media_item_id, assignment.state)
+        clientMap.set(assignment.media_item_id, assignment)
       }
       map.set(client.id, clientMap)
     }
@@ -103,12 +103,12 @@ function StaticClientPills({ clients }: { clients: Client[] }) {
 function EpisodeSyncPill({
   client,
   mediaItemId,
-  currentState,
+  currentAssignment,
   profiles,
 }: {
   client: Client
   mediaItemId: string
-  currentState: AssignmentState | null
+  currentAssignment: ClientAssignment | null
   profiles: Profile[]
 }) {
   const queryClient = useQueryClient()
@@ -167,7 +167,7 @@ function EpisodeSyncPill({
     },
   })
 
-  const showForm = pickerOpen && currentState === null
+  const showForm = pickerOpen && currentAssignment === null
   const showPopover = showForm || errorMessage !== null
   const isBusy = createMutation.isPending || deleteMutation.isPending
 
@@ -192,17 +192,17 @@ function EpisodeSyncPill({
     <div ref={anchorRef} className="sync-pill-anchor">
       <button
         type="button"
-        className={episodePillClassName(currentState)}
-        disabled={currentState === 'evict' || isBusy}
+        className={episodePillClassName(currentAssignment?.pipeline_status ?? null)}
+        disabled={currentAssignment?.state === 'evict' || isBusy}
         onClick={(event) => {
           event.stopPropagation()
           setErrorMessage(null)
 
-          if (currentState === 'evict') {
+          if (currentAssignment?.state === 'evict') {
             return
           }
 
-          if (currentState === null) {
+          if (currentAssignment === null) {
             setPickerOpen((value) => !value)
             return
           }
@@ -269,12 +269,12 @@ function EpisodeSyncPills({
   clients,
   mediaItemId,
   profiles,
-  assignmentStateByClient,
+  assignmentMap,
 }: {
   clients: Client[]
   mediaItemId: string
   profiles: Profile[]
-  assignmentStateByClient: ClientAssignmentStateMap
+  assignmentMap: ClientAssignmentMap
 }) {
   return (
     <>
@@ -283,7 +283,7 @@ function EpisodeSyncPills({
           key={client.id}
           client={client}
           mediaItemId={mediaItemId}
-          currentState={assignmentStateFor(assignmentStateByClient, client.id, mediaItemId)}
+          currentAssignment={assignmentFor(assignmentMap, client.id, mediaItemId)}
           profiles={profiles}
         />
       ))}
@@ -299,12 +299,16 @@ function BulkSyncPill({
   scopeType,
   scopeParams,
   profiles,
+  childMediaItemIds,
+  assignmentMap,
 }: {
   client: Client
   showId: string
   scopeType: 'show:all' | 'show:seasons'
   scopeParams: Record<string, unknown> | null
   profiles: Profile[]
+  childMediaItemIds: string[]
+  assignmentMap: ClientAssignmentMap
 }) {
   const queryClient = useQueryClient()
   const anchorRef = useRef<HTMLDivElement | null>(null)
@@ -343,6 +347,17 @@ function BulkSyncPill({
     Boolean(matchingSub) &&
     matchingSub?.scope_type === 'show:all'
   const isSubscribed = Boolean(matchingSub)
+  const bulkPipelineStatus = useMemo((): PipelineStatus | null => {
+    if (!isSubscribed) return null
+    const statuses = childMediaItemIds
+      .map((id) => assignmentMap.get(client.id)?.get(id)?.pipeline_status)
+      .filter((s): s is PipelineStatus => s != null)
+    if (statuses.length === 0) return 'queued'
+    if (statuses.includes('failed')) return 'failed'
+    if (statuses.includes('transferring')) return 'transferring'
+    if (statuses.includes('queued')) return 'queued'
+    return 'ready'
+  }, [childMediaItemIds, assignmentMap, client.id, isSubscribed])
 
   const closePopover = () => {
     setPickerOpen(false)
@@ -409,7 +424,7 @@ function BulkSyncPill({
     <div ref={anchorRef} className="sync-pill-anchor">
       <button
         type="button"
-        className={isSubscribed ? 'sync-pill sync-pill--on' : 'sync-pill'}
+        className={episodePillClassName(bulkPipelineStatus)}
         disabled={isBusy || isCoveredByShowAll}
         onClick={(event) => {
           event.stopPropagation()
@@ -482,12 +497,16 @@ function BulkSyncPills({
   scopeType,
   scopeParams,
   profiles,
+  childMediaItemIds,
+  assignmentMap,
 }: {
   clients: Client[]
   showId: string
   scopeType: 'show:all' | 'show:seasons'
   scopeParams: Record<string, unknown> | null
   profiles: Profile[]
+  childMediaItemIds: string[]
+  assignmentMap: ClientAssignmentMap
 }) {
   return (
     <>
@@ -499,6 +518,8 @@ function BulkSyncPills({
           scopeType={scopeType}
           scopeParams={scopeParams}
           profiles={profiles}
+          childMediaItemIds={childMediaItemIds}
+          assignmentMap={assignmentMap}
         />
       ))}
     </>
@@ -511,14 +532,14 @@ function EpisodeRows({
   profiles,
   depth,
   assetMap,
-  assignmentStateByClient,
+  assignmentMap,
 }: {
   episodes: MediaItem[]
   clients: Client[]
   profiles: Profile[]
   depth: number
   assetMap: Map<string, { status: string }>
-  assignmentStateByClient: ClientAssignmentStateMap
+  assignmentMap: ClientAssignmentMap
 }) {
   return (
     <>
@@ -537,7 +558,7 @@ function EpisodeRows({
                 clients={clients}
                 mediaItemId={episode.id}
                 profiles={profiles}
-                assignmentStateByClient={assignmentStateByClient}
+                assignmentMap={assignmentMap}
               />
             )}
           />
@@ -587,7 +608,7 @@ function SeasonRow({
     return map
   }, [assetsQuery.data])
 
-  const assignmentStateByClient = useClientAssignmentMap(
+  const assignmentMap = useClientAssignmentMap(
     clients,
     episodeIds,
     isOpen && episodeIds.length > 0,
@@ -609,6 +630,8 @@ function SeasonRow({
             scopeType="show:seasons"
             scopeParams={{ seasons: [season.season_number] }}
             profiles={profiles}
+            childMediaItemIds={episodeIds}
+            assignmentMap={assignmentMap}
           />
         ) : null}
         onClick={() => setIsOpen((value) => !value)}
@@ -620,7 +643,7 @@ function SeasonRow({
           profiles={profiles}
           depth={depth + 1}
           assetMap={assetMap}
-          assignmentStateByClient={assignmentStateByClient}
+          assignmentMap={assignmentMap}
         />
       ) : null}
     </>
@@ -640,7 +663,7 @@ function MovieRow({
   profiles: Profile[]
   depth: number
 }) {
-  const assignmentStateByClient = useClientAssignmentMap(clients, [item.id], true)
+  const assignmentMap = useClientAssignmentMap(clients, [item.id], true)
 
   const assetsQuery = useQuery({
     queryKey: ['assets', [item.id]],
@@ -664,7 +687,7 @@ function MovieRow({
           clients={clients}
           mediaItemId={item.id}
           profiles={profiles}
-          assignmentStateByClient={assignmentStateByClient}
+          assignmentMap={assignmentMap}
         />
       )}
     />
@@ -711,7 +734,7 @@ function ShowRow({
     return map
   }, [assetsQuery.data])
 
-  const assignmentStateByClient = useClientAssignmentMap(
+  const assignmentMap = useClientAssignmentMap(
     clients,
     episodeIds,
     isOpen && episodeIds.length > 0 && seasons.length === 0,
@@ -739,6 +762,8 @@ function ShowRow({
             scopeType="show:all"
             scopeParams={null}
             profiles={profiles}
+            childMediaItemIds={episodeIds}
+            assignmentMap={assignmentMap}
           />
         )}
         onClick={() => setIsOpen((value) => !value)}
@@ -762,7 +787,7 @@ function ShowRow({
           profiles={profiles}
           depth={depth + 1}
           assetMap={assetMap}
-          assignmentStateByClient={assignmentStateByClient}
+          assignmentMap={assignmentMap}
         />
       ) : null}
     </>

@@ -32,7 +32,25 @@ export type Subscription = {
 export type ClientAssignment = {
   media_item_id: string
   state: 'ready' | 'queued' | 'evict'
+  asset_id: number
+  profile_id: string
+  pipeline_status: PipelineStatus
+  pipeline_substate: PipelineSubstate | null
+  pipeline_detail: string | null
 }
+
+export type PipelineStatus = 'queued' | 'transferring' | 'ready' | 'failed'
+
+export type PipelineSubstate =
+  | 'transcoding_pending'
+  | 'transcoding'
+  | 'waiting_for_agent'
+  | 'agent_offline'
+  | 'downloading'
+  | 'verifying'
+  | 'stalled'
+  | 'delivered'
+  | 'transcode_failed'
 
 export type MediaLibrary = {
   id: string
@@ -67,4 +85,21 @@ export type AssetRow = {
   size_bytes: number | null
   ready_at: string | null
   bytes_downloaded: number | null
+}
+
+export type QueueRow = {
+  asset_id: number
+  client_id: string
+  media_item_id: string
+  filename: string
+  profile_id: string
+  size_bytes: number | null
+  bytes_downloaded: number | null
+  transfer_rate_bps: number | null
+  eta_seconds: number | null
+  pipeline_status: PipelineStatus
+  pipeline_substate: PipelineSubstate | null
+  pipeline_detail: string | null
+  delivered_at: string | null
+  created_at: string
 }

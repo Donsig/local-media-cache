@@ -1,30 +1,25 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { deleteAsset, getAllAssets } from '../api'
+import { useQuery } from '@tanstack/react-query'
+import { getQueue } from '../api'
 import { Badge } from '../components/Badge'
-import { Btn } from '../components/Btn'
 import { PillTabs } from '../components/PillTabs'
-import type { AssetRow } from '../types'
+import type { PipelineStatus, QueueRow } from '../types'
 
 type BadgeColor = 'ready' | 'transcoding' | 'queued' | 'failed' | 'default'
 
-function statusToBadgeColor(status: string): BadgeColor {
+function pipelineStatusToBadgeColor(status: PipelineStatus): BadgeColor {
   if (status === 'ready') return 'ready'
-  if (status === 'transcoding') return 'transcoding'
+  if (status === 'transferring') return 'transcoding'
   if (status === 'queued') return 'queued'
   if (status === 'failed') return 'failed'
   return 'default'
 }
 
-const STATUS_SORT_ORDER: Record<string, number> = {
-  transcoding: 0,
+const PIPELINE_SORT_ORDER: Record<PipelineStatus, number> = {
+  transferring: 0,
   queued: 1,
   failed: 2,
   ready: 3,
-}
-
-function sortOrder(status: string): number {
-  return STATUS_SORT_ORDER[status] ?? 99
 }
 
 function formatBytes(bytes: number | null): string {
@@ -35,15 +30,18 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`
 }
 
-function formatRelativeTime(isoString: string): string {
-  const date = new Date(isoString)
-  const diffMs = Date.now() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return 'just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  return `${Math.floor(diffHours / 24)}d ago`
+function formatRate(bps: number): string {
+  if (bps < 1024) return `${bps.toFixed(0)} B/s`
+  if (bps < 1024 ** 2) return `${(bps / 1024).toFixed(1)} KB/s`
+  return `${(bps / 1024 ** 2).toFixed(1)} MB/s`
+}
+
+function formatEta(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.round(seconds % 60)
+  if (mins < 60) return `${mins}m ${secs}s`
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }
 
 function parseShowGroup(filename: string): string {
@@ -53,59 +51,74 @@ function parseShowGroup(filename: string): string {
   return dashIdx > 0 ? filename.slice(0, dashIdx) : filename
 }
 
-const ACTIVE_STATUSES = new Set(['transcoding', 'downloading', 'queued'])
+function QueueRowItem({ row }: { row: QueueRow }) {
+  const isTransferring = row.pipeline_status === 'transferring'
+  const isVerifying = row.pipeline_substate === 'verifying'
+  const isStalled = row.pipeline_substate === 'stalled'
 
-function AssetRowItem({ asset, onDelete }: { asset: AssetRow; onDelete: () => void }) {
   const hasDeterminateProgress =
-    asset.bytes_downloaded != null &&
-    asset.size_bytes != null &&
-    asset.size_bytes > 0 &&
-    asset.bytes_downloaded < asset.size_bytes
-  const isActive =
-    asset.status !== 'ready'
-      ? ACTIVE_STATUSES.has(asset.status)
-      : hasDeterminateProgress
+    isTransferring &&
+    !isVerifying &&
+    row.bytes_downloaded != null &&
+    row.size_bytes != null &&
+    row.size_bytes > 0 &&
+    row.bytes_downloaded < row.size_bytes
+
+  const showRateEta =
+    isTransferring &&
+    !isVerifying &&
+    !isStalled &&
+    row.transfer_rate_bps != null &&
+    row.eta_seconds != null
 
   return (
     <div className="queue-row">
       <div className="queue-row__status">
-        <Badge color={statusToBadgeColor(asset.status)} label={asset.status} />
+        <Badge
+          color={pipelineStatusToBadgeColor(row.pipeline_status)}
+          label={row.pipeline_status === 'transferring' ? 'syncing' : row.pipeline_status}
+        />
+        <span className="queue-row__client" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #888)' }}>
+          to {row.client_id}
+        </span>
       </div>
       <div className="queue-row__main">
-        <span className="queue-row__filename">{asset.filename}</span>
-        {isActive ? (
+        <span className="queue-row__filename">{row.filename}</span>
+        {isTransferring ? (
           <div className="queue-row__progress">
             <div className="progress__track" aria-hidden="true">
-              {hasDeterminateProgress ? (
+              {isVerifying ? (
+                <div className="progress__fill progress__fill--indeterminate" />
+              ) : hasDeterminateProgress ? (
                 <div
                   className="progress__fill"
-                  style={{ width: `${Math.min(100, (asset.bytes_downloaded! / asset.size_bytes!) * 100).toFixed(1)}%` }}
+                  style={{ width: `${Math.min(100, (row.bytes_downloaded! / row.size_bytes!) * 100).toFixed(1)}%` }}
                 />
               ) : (
                 <div className="progress__fill progress__fill--indeterminate" />
               )}
             </div>
             {hasDeterminateProgress ? (
-              <span
-                className="progress__label"
-                style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #888)', marginTop: '2px' }}
-              >
-                {formatBytes(asset.bytes_downloaded)} / {formatBytes(asset.size_bytes)}
+              <span className="progress__label" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #888)', marginTop: '2px' }}>
+                {formatBytes(row.bytes_downloaded)} / {formatBytes(row.size_bytes)}
+                {showRateEta ? (
+                  <span style={{ marginLeft: '0.5rem' }}>
+                    · {formatRate(row.transfer_rate_bps!)} · ETA {formatEta(row.eta_seconds!)}
+                  </span>
+                ) : null}
               </span>
             ) : null}
           </div>
         ) : null}
-        {asset.status === 'failed' && asset.status_detail ? (
-          <span className="queue-row__detail">{asset.status_detail}</span>
+        {row.pipeline_detail ? (
+          <span className="queue-row__detail" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #888)', marginTop: '2px', display: 'block' }}>
+            {row.pipeline_detail}
+          </span>
         ) : null}
       </div>
       <div className="queue-row__meta">
-        <span className="queue-row__profile">{asset.profile_id}</span>
-        <span className="queue-row__size">{formatBytes(asset.size_bytes)}</span>
-        {asset.ready_at ? (
-          <span className="queue-row__ready">ready {formatRelativeTime(asset.ready_at)}</span>
-        ) : null}
-        <Btn size="small" variant="danger" onClick={onDelete}>Remove</Btn>
+        <span className="queue-row__profile">{row.profile_id}</span>
+        <span className="queue-row__size">{formatBytes(row.size_bytes)}</span>
       </div>
     </div>
   )
@@ -114,57 +127,46 @@ function AssetRowItem({ asset, onDelete }: { asset: AssetRow; onDelete: () => vo
 const FILTER_TABS = [
   { label: 'All', value: 'all' },
   { label: 'Queued', value: 'queued' },
-  { label: 'Transcoding', value: 'transcoding' },
+  { label: 'Transferring', value: 'transferring' },
   { label: 'Ready', value: 'ready' },
   { label: 'Failed', value: 'failed' },
 ]
 
 export function QueueScreen() {
   const [activeFilter, setActiveFilter] = useState('all')
-  const queryClient = useQueryClient()
 
-  const assetsQuery = useQuery({
-    queryKey: ['assets', 'all'],
-    queryFn: getAllAssets,
+  const queueQuery = useQuery({
+    queryKey: ['queue'],
+    queryFn: () => getQueue(),
     staleTime: 10_000,
     refetchInterval: 15_000,
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteAsset,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
-  })
+  const rows = queueQuery.data?.rows ?? []
 
-  const assets = assetsQuery.data ?? []
-
-  const counts = useMemo(() => {
-    const queued = assets.filter((a) => a.status === 'queued').length
-    const transcoding = assets.filter((a) => a.status === 'transcoding').length
-    const ready = assets.filter((a) => a.status === 'ready').length
-    return { queued, transcoding, ready }
-  }, [assets])
+  const counts = useMemo(() => ({
+    transferring: rows.filter((r) => r.pipeline_status === 'transferring').length,
+    queued: rows.filter((r) => r.pipeline_status === 'queued').length,
+    ready: rows.filter((r) => r.pipeline_status === 'ready').length,
+  }), [rows])
 
   const subtitle = [
+    counts.transferring > 0 ? `${counts.transferring} transferring` : null,
     counts.queued > 0 ? `${counts.queued} queued` : null,
-    counts.transcoding > 0 ? `${counts.transcoding} transcoding` : null,
     counts.ready > 0 ? `${counts.ready} ready` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ') || 'No active transfers'
+  ].filter(Boolean).join(' · ') || 'No active transfers'
 
   const filtered = useMemo(() => {
-    const list = activeFilter === 'all'
-      ? [...assets]
-      : assets.filter((a) => a.status === activeFilter)
-    return list.sort((a, b) => sortOrder(a.status) - sortOrder(b.status))
-  }, [assets, activeFilter])
+    const list = activeFilter === 'all' ? [...rows] : rows.filter((r) => r.pipeline_status === activeFilter)
+    return list.sort((a, b) => (PIPELINE_SORT_ORDER[a.pipeline_status] ?? 99) - (PIPELINE_SORT_ORDER[b.pipeline_status] ?? 99))
+  }, [rows, activeFilter])
 
   const grouped = useMemo(() => {
-    const map = new Map<string, AssetRow[]>()
-    for (const asset of filtered) {
-      const key = parseShowGroup(asset.filename)
+    const map = new Map<string, QueueRow[]>()
+    for (const row of filtered) {
+      const key = parseShowGroup(row.filename)
       const group = map.get(key) ?? []
-      group.push(asset)
+      group.push(row)
       map.set(key, group)
     }
     return map
@@ -179,33 +181,25 @@ export function QueueScreen() {
           <p className="screen-subtitle">{subtitle}</p>
         </div>
       </header>
-
       <div className="card">
         <div className="library-toolbar">
           <PillTabs tabs={FILTER_TABS} active={activeFilter} onChange={setActiveFilter} />
         </div>
-
-        {assetsQuery.isLoading ? (
+        {queueQuery.isLoading ? (
           <div className="notice">Loading…</div>
-        ) : assetsQuery.error ? (
-          <div className="notice notice--error">{(assetsQuery.error as Error).message}</div>
+        ) : queueQuery.error ? (
+          <div className="notice notice--error">{(queueQuery.error as Error).message}</div>
         ) : filtered.length === 0 ? (
           <div className="notice">
-            {activeFilter === 'all'
-              ? 'No assets yet. Subscribe to content in the Library.'
-              : `No ${activeFilter} assets.`}
+            {activeFilter === 'all' ? 'No assets yet. Subscribe to content in the Library.' : `No ${activeFilter} transfers.`}
           </div>
         ) : (
           <div className="queue-list">
-            {Array.from(grouped.entries()).map(([groupName, groupAssets]) => (
+            {Array.from(grouped.entries()).map(([groupName, groupRows]) => (
               <div key={groupName} className="queue-group">
                 <div className="queue-group__header">{groupName}</div>
-                {groupAssets.map((asset) => (
-                  <AssetRowItem
-                    key={asset.asset_id}
-                    asset={asset}
-                    onDelete={() => deleteMutation.mutate(asset.asset_id)}
-                  />
+                {groupRows.map((row) => (
+                  <QueueRowItem key={`${row.asset_id}-${row.client_id}`} row={row} />
                 ))}
               </div>
             ))}

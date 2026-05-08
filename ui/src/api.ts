@@ -6,7 +6,9 @@ import type {
   MediaItem,
   MediaItemDetails,
   MediaLibrary,
+  PipelineStatus,
   Profile,
+  QueueRow,
   Subscription,
 } from './types'
 
@@ -146,4 +148,17 @@ export async function getClientAssignments(
   return request<ClientAssignment[]>(
     `/api/clients/${encodeURIComponent(clientId)}/assignments?${searchParams.toString()}`,
   )
+}
+
+export async function getQueue(params?: {
+  status?: PipelineStatus[]
+  client_id?: string
+}): Promise<{ rows: QueueRow[] }> {
+  const search = new URLSearchParams()
+  if (params?.status) {
+    for (const s of params.status) search.append('status', s)
+  }
+  if (params?.client_id) search.set('client_id', params.client_id)
+  const qs = search.toString()
+  return request<{ rows: QueueRow[] }>(`/api/queue${qs ? `?${qs}` : ''}`)
 }
