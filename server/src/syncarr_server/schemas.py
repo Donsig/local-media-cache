@@ -169,6 +169,7 @@ class AssetStatusSchema(Schema):
     status_detail: str | None = None
     size_bytes: int | None = None
     ready_at: datetime | None = None
+    bytes_downloaded: int | None = None
 
 
 AgentAssignmentState = Literal["queued", "ready", "evict"]
@@ -209,6 +210,10 @@ class AgentConfirmRequest(Schema):
     state: AgentConfirmState
     actual_sha256: str | None = None
     actual_size_bytes: int | None = None
+
+
+class AgentProgressRequest(Schema):
+    bytes_downloaded: int
 
 
 class AgentConfirmResponse(Schema):

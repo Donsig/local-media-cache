@@ -491,3 +491,59 @@ async def test_list_all_assets_no_filter(
     assert data[0]["status"] == "ready"
     assert data[1]["media_item_id"] == "ep-older"
     assert data[1]["status"] == "queued"
+
+
+async def test_get_assets_includes_bytes_downloaded(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+    agent_client: Client,
+) -> None:
+    """GET /assets includes bytes_downloaded from assignments."""
+    profile = Profile(
+        id="p-progress",
+        name="Progress",
+        ffmpeg_args=None,
+        target_size_bytes=None,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(profile)
+    await db_session.flush()
+
+    asset = Asset(
+        source_media_id="ep-progress",
+        profile_id="p-progress",
+        source_path="/mnt/media/ep.mkv",
+        cache_path=None,
+        size_bytes=100_000,
+        sha256=None,
+        status="ready",
+        status_detail=None,
+        created_at=datetime.now(UTC),
+        ready_at=datetime.now(UTC),
+    )
+    db_session.add(asset)
+    await db_session.flush()
+
+    db_session.add(
+        Assignment(
+            client_id=agent_client.id,
+            asset_id=asset.id,
+            state="pending",
+            created_at=datetime.now(UTC),
+            delivered_at=None,
+            evict_requested_at=None,
+            bytes_downloaded=42_000,
+        )
+    )
+    await db_session.commit()
+
+    response = await http_client.get(
+        "/assets?media_item_ids=ep-progress",
+        headers=auth_headers_ui,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["bytes_downloaded"] == 42_000

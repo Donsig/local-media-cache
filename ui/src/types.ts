@@ -66,4 +66,5 @@ export type AssetRow = {
   status_detail: string | null
   size_bytes: number | null
   ready_at: string | null
+  bytes_downloaded: number | null
 }

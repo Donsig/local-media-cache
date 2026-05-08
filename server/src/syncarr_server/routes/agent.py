@@ -21,6 +21,7 @@ from syncarr_server.schemas import (
     AgentAssignmentState,
     AgentConfirmRequest,
     AgentConfirmResponse,
+    AgentProgressRequest,
     ReconcileRequest,
     ReconcileResponse,
 )
@@ -215,6 +216,26 @@ async def reconcile_assignments(
         orphans_to_delete=sorted(orphans_to_delete),
         missing_to_redownload=sorted(missing_to_redownload),
     )
+
+
+@router.patch(
+    "/assignments/{asset_id}/progress",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def update_assignment_progress(
+    asset_id: int,
+    payload: AgentProgressRequest,
+    client: Annotated[Client, Depends(require_agent_auth)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    assignment_asset = await _get_assignment_asset(session, client.id, asset_id)
+    if assignment_asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    assignment, _asset = assignment_asset
+    if assignment.state not in ("pending",):
+        return
+    assignment.bytes_downloaded = payload.bytes_downloaded
+    await session.commit()
 
 
 @router.post(

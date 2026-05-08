@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import structlog
 
-from syncarr_agent.aria2_client import DownloadStatus
+from syncarr_agent.aria2_client import DownloadInfo, DownloadStatus
 from syncarr_agent.client import AssignmentItem, ReconcileResponse, ServerClient
 from syncarr_agent.reconciler import reconcile, run_reconcile
 from syncarr_agent.state import DownloadRecord, StateDB
@@ -89,6 +89,15 @@ def _run_reconcile(
 
 def _real_state(tmp_path: Path) -> StateDB:
     return StateDB(tmp_path / "state.db")
+
+
+def _attach_progress_tracking(server: Any) -> None:
+    server.progress_reports = []
+
+    def report_progress(asset_id: int, bytes_downloaded: int) -> None:
+        server.progress_reports.append((asset_id, bytes_downloaded))
+
+    server.report_progress = report_progress
 
 
 class _ReconcileServer:
@@ -170,12 +179,57 @@ def test_ready_active_download_is_noop(
     assignment = _assignment()
     local_path = _local_path(tmp_library_root, assignment)
     _add_record(mock_state, assignment, local_path, "gid001")
+    _attach_progress_tracking(mock_server)
     mock_aria2.set_status("gid001", DownloadStatus.ACTIVE)
 
     _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
 
     assert mock_aria2._add_calls == []
     assert mock_server.delivered_confirms == []
+
+
+def test_handle_ready_active_reports_progress(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    _add_record(mock_state, assignment, local_path, "gid001")
+    _attach_progress_tracking(mock_server)
+    mock_aria2._statuses["gid001"] = DownloadInfo(
+        gid="gid001",
+        status=DownloadStatus.ACTIVE,
+        completed_length=1024,
+        total_length=4096,
+    )
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_server.progress_reports == [(assignment.asset_id, 1024)]
+
+
+def test_handle_ready_active_zero_bytes_no_report(
+    mock_state,
+    mock_aria2,
+    mock_server,
+    tmp_library_root: Path,
+) -> None:
+    assignment = _assignment()
+    local_path = _local_path(tmp_library_root, assignment)
+    _add_record(mock_state, assignment, local_path, "gid001")
+    _attach_progress_tracking(mock_server)
+    mock_aria2._statuses["gid001"] = DownloadInfo(
+        gid="gid001",
+        status=DownloadStatus.ACTIVE,
+        completed_length=0,
+        total_length=4096,
+    )
+
+    _run_reconcile([assignment], mock_state, mock_aria2, mock_server, tmp_library_root)
+
+    assert mock_server.progress_reports == []
 
 
 def test_ready_complete_sha256_match_confirms_delivered(

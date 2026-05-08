@@ -173,6 +173,20 @@ def test_confirm_evicted_404_treated_as_success() -> None:
         client.confirm_evicted(55)
 
 
+def test_report_progress_sends_patch(respx_mock: respx.MockRouter) -> None:
+    respx_mock.patch("/assignments/7/progress").mock(return_value=httpx.Response(204))
+    client = ServerClient("http://server", "tok")
+    client.report_progress(7, 512_000)
+    assert respx_mock.calls.call_count == 1
+    assert respx_mock.calls[0].request.content == b'{"bytes_downloaded":512000}'
+
+
+def test_report_progress_ignores_errors(respx_mock: respx.MockRouter) -> None:
+    respx_mock.patch("/assignments/7/progress").mock(return_value=httpx.Response(500))
+    client = ServerClient("http://server", "tok")
+    client.report_progress(7, 512_000)
+
+
 def test_get_assignments_parses_relative_path() -> None:
     with respx.mock(base_url=SERVER_URL) as router:
         router.get("/assignments").mock(return_value=httpx.Response(200, json=FULL_RESPONSE))

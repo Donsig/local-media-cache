@@ -593,6 +593,76 @@ async def test_confirm_is_idempotent(
     assert assignment.state == "delivered"
 
 
+async def test_progress_update_stores_bytes_downloaded(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """PATCH /assignments/{id}/progress stores bytes_downloaded on the assignment."""
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+    )
+
+    response = await http_client.patch(
+        f"/assignments/{asset_id}/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 512_000},
+    )
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+    assert assignment is not None
+    assert assignment.bytes_downloaded == 512_000
+
+
+async def test_progress_update_404_for_unknown_asset(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+) -> None:
+    response = await http_client.patch(
+        "/assignments/99999/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 1024},
+    )
+    assert response.status_code == 404
+
+
+async def test_progress_ignored_for_evicted_assignment(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    """Progress reports on evicted assignments are silently ignored (no error, no update)."""
+    client_id = agent_client.id
+    asset_id = await _create_asset_assignment(
+        db_session,
+        client_id=client_id,
+        files=agent_test_files,
+        assignment_state="evict",
+    )
+
+    response = await http_client.patch(
+        f"/assignments/{asset_id}/progress",
+        headers=auth_headers_agent,
+        json={"bytes_downloaded": 999},
+    )
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    assignment = await _get_assignment(db_session, client_id=client_id, asset_id=asset_id)
+    assert assignment is not None
+    assert assignment.bytes_downloaded is None
+
+
 async def test_reconcile_present_delivered_unchanged(
     http_client: AsyncClient,
     auth_headers_agent: dict[str, str],

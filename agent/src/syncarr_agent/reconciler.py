@@ -161,7 +161,9 @@ def _handle_ready(
             # status == 'active': check aria2
             info = aria2.get_status(record.gid)
             if info.status in (DownloadStatus.ACTIVE, DownloadStatus.WAITING):
-                # In-progress — nothing to do.
+                # In-progress — report bytes downloaded so far (best-effort).
+                if info.completed_length > 0:
+                    server.report_progress(asset_id, info.completed_length)
                 return
 
             if info.status == DownloadStatus.COMPLETE:

@@ -90,6 +90,7 @@ class Assignment(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     evict_requested_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
+    bytes_downloaded: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     client: Mapped[Client] = relationship(back_populates="assignments")
     asset: Mapped[Asset] = relationship(back_populates="assignments")

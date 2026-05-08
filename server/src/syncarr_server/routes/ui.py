@@ -493,11 +493,26 @@ async def list_assets(
     session: Annotated[AsyncSession, Depends(get_session)],
     media_item_ids: str = "",
 ) -> list[AssetStatusSchema]:
+    from sqlalchemy import func
+
     ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
-    query = select(Asset).order_by(Asset.created_at.desc())
+    progress_sq = (
+        select(
+            Assignment.asset_id,
+            func.max(Assignment.bytes_downloaded).label("bytes_downloaded"),
+        )
+        .group_by(Assignment.asset_id)
+        .subquery()
+    )
+
+    query = (
+        select(Asset, progress_sq.c.bytes_downloaded)
+        .outerjoin(progress_sq, Asset.id == progress_sq.c.asset_id)
+        .order_by(Asset.created_at.desc())
+    )
     if ids:
         query = query.where(Asset.source_media_id.in_(ids))
-    assets = list((await session.execute(query)).scalars())
+    rows = list((await session.execute(query)).all())
     return [
         AssetStatusSchema(
             asset_id=asset.id,
@@ -508,6 +523,7 @@ async def list_assets(
             status_detail=asset.status_detail,
             size_bytes=asset.size_bytes,
             ready_at=asset.ready_at,
+            bytes_downloaded=bytes_downloaded,
         )
-        for asset in assets
+        for asset, bytes_downloaded in rows
     ]

@@ -131,6 +131,18 @@ class ServerClient:
             return
         resp.raise_for_status()
 
+    def report_progress(self, asset_id: int, bytes_downloaded: int) -> None:
+        """Report bytes downloaded so far. Best-effort — ignores non-fatal errors."""
+        try:
+            resp = self._client.patch(
+                f"/assignments/{asset_id}/progress",
+                json={"bytes_downloaded": bytes_downloaded},
+            )
+            resp.raise_for_status()
+        except Exception:
+            # Progress reporting is best-effort; never let it abort the poll loop.
+            pass
+
     def reconcile(self, assets_present: list[int]) -> ReconcileResponse:
         resp = self._client.post("/reconcile", json={"assets_present": assets_present})
         resp.raise_for_status()

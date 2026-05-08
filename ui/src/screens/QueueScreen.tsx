@@ -46,10 +46,25 @@ function formatRelativeTime(isoString: string): string {
   return `${Math.floor(diffHours / 24)}d ago`
 }
 
+function parseShowGroup(filename: string): string {
+  const tvMatch = filename.match(/^(.+?)\s+-\s+S\d{2}E\d{2}/i)
+  if (tvMatch) return tvMatch[1]
+  const dashIdx = filename.indexOf(' - ')
+  return dashIdx > 0 ? filename.slice(0, dashIdx) : filename
+}
+
 const ACTIVE_STATUSES = new Set(['transcoding', 'downloading', 'queued'])
 
 function AssetRowItem({ asset, onDelete }: { asset: AssetRow; onDelete: () => void }) {
-  const isActive = ACTIVE_STATUSES.has(asset.status)
+  const hasDeterminateProgress =
+    asset.bytes_downloaded != null &&
+    asset.size_bytes != null &&
+    asset.size_bytes > 0 &&
+    asset.bytes_downloaded < asset.size_bytes
+  const isActive =
+    asset.status !== 'ready'
+      ? ACTIVE_STATUSES.has(asset.status)
+      : hasDeterminateProgress
 
   return (
     <div className="queue-row">
@@ -61,8 +76,23 @@ function AssetRowItem({ asset, onDelete }: { asset: AssetRow; onDelete: () => vo
         {isActive ? (
           <div className="queue-row__progress">
             <div className="progress__track" aria-hidden="true">
-              <div className="progress__fill progress__fill--indeterminate" />
+              {hasDeterminateProgress ? (
+                <div
+                  className="progress__fill"
+                  style={{ width: `${Math.min(100, (asset.bytes_downloaded! / asset.size_bytes!) * 100).toFixed(1)}%` }}
+                />
+              ) : (
+                <div className="progress__fill progress__fill--indeterminate" />
+              )}
             </div>
+            {hasDeterminateProgress ? (
+              <span
+                className="progress__label"
+                style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #888)', marginTop: '2px' }}
+              >
+                {formatBytes(asset.bytes_downloaded)} / {formatBytes(asset.size_bytes)}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {asset.status === 'failed' && asset.status_detail ? (
@@ -129,6 +159,17 @@ export function QueueScreen() {
     return list.sort((a, b) => sortOrder(a.status) - sortOrder(b.status))
   }, [assets, activeFilter])
 
+  const grouped = useMemo(() => {
+    const map = new Map<string, AssetRow[]>()
+    for (const asset of filtered) {
+      const key = parseShowGroup(asset.filename)
+      const group = map.get(key) ?? []
+      group.push(asset)
+      map.set(key, group)
+    }
+    return map
+  }, [filtered])
+
   return (
     <section className="screen">
       <header className="screen-header">
@@ -156,12 +197,17 @@ export function QueueScreen() {
           </div>
         ) : (
           <div className="queue-list">
-            {filtered.map((asset) => (
-              <AssetRowItem
-                key={asset.asset_id}
-                asset={asset}
-                onDelete={() => deleteMutation.mutate(asset.asset_id)}
-              />
+            {Array.from(grouped.entries()).map(([groupName, groupAssets]) => (
+              <div key={groupName} className="queue-group">
+                <div className="queue-group__header">{groupName}</div>
+                {groupAssets.map((asset) => (
+                  <AssetRowItem
+                    key={asset.asset_id}
+                    asset={asset}
+                    onDelete={() => deleteMutation.mutate(asset.asset_id)}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         )}
