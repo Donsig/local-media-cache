@@ -341,7 +341,7 @@ async def test_list_client_assignments(
     )
 
     assert response.status_code == 200
-    assert response.json() == [{"media_item_id": "ep-ready", "state": "ready"}]
+    assert response.json() == [{"media_item_id": "ep-ready", "state": "queued"}]
 
     assert other_client_response.status_code == 200
     assert other_client_response.json() == []
@@ -381,6 +381,61 @@ async def test_list_client_assignments(
     assert delivered_response.json() == [
         {"media_item_id": "ep-delivered", "state": "ready"}
     ]
+
+
+async def test_list_client_assignments_ready_asset_shows_queued(
+    http_client: AsyncClient,
+    auth_headers_ui: dict[str, str],
+    db_session: AsyncSession,
+    agent_client: Client,
+) -> None:
+    """An asset ready on server but not yet delivered to satellite shows as 'queued'."""
+    profile = Profile(
+        id="p-pill28",
+        name="Pill28",
+        ffmpeg_args=None,
+        target_size_bytes=None,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(profile)
+    await db_session.flush()
+
+    asset = Asset(
+        source_media_id="ep-ready-not-delivered",
+        profile_id="p-pill28",
+        source_path="/mnt/media/ep.mkv",
+        cache_path=None,
+        size_bytes=1234,
+        sha256="abc123",
+        status="ready",
+        status_detail=None,
+        created_at=datetime.now(UTC),
+        ready_at=datetime.now(UTC),
+    )
+    db_session.add(asset)
+    await db_session.flush()
+
+    db_session.add(
+        Assignment(
+            client_id=agent_client.id,
+            asset_id=asset.id,
+            state="pending",
+            created_at=datetime.now(UTC),
+            delivered_at=None,
+            evict_requested_at=None,
+        )
+    )
+    await db_session.commit()
+
+    response = await http_client.get(
+        f"/clients/{agent_client.id}/assignments?media_item_ids=ep-ready-not-delivered",
+        headers=auth_headers_ui,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["state"] == "queued"
 
 
 async def test_list_all_assets_no_filter(

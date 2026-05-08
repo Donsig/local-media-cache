@@ -326,7 +326,9 @@ function BulkSyncPill({
 
   const matchingSub = useMemo(() => {
     return subsQuery.data?.find((sub) => {
-      if (sub.media_item_id !== showId || sub.scope_type !== scopeType) return false
+      if (sub.media_item_id !== showId) return false
+      if (scopeType === 'show:seasons' && sub.scope_type === 'show:all') return true
+      if (sub.scope_type !== scopeType) return false
       if (scopeType === 'show:seasons') {
         const subSeasons = sub.scope_params?.seasons as number[] | undefined
         const wantedSeasons = (scopeParams?.seasons ?? []) as number[]
@@ -336,6 +338,10 @@ function BulkSyncPill({
     })
   }, [subsQuery.data, showId, scopeType, scopeParams])
 
+  const isCoveredByShowAll =
+    scopeType === 'show:seasons' &&
+    Boolean(matchingSub) &&
+    matchingSub?.scope_type === 'show:all'
   const isSubscribed = Boolean(matchingSub)
 
   const closePopover = () => {
@@ -404,7 +410,7 @@ function BulkSyncPill({
       <button
         type="button"
         className={isSubscribed ? 'sync-pill sync-pill--on' : 'sync-pill'}
-        disabled={isBusy}
+        disabled={isBusy || isCoveredByShowAll}
         onClick={(event) => {
           event.stopPropagation()
           setErrorMessage(null)

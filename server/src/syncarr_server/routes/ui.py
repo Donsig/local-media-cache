@@ -254,7 +254,7 @@ async def list_client_assignments(
         assignments.append(
             ClientAssignmentSchema(
                 media_item_id=asset.source_media_id,
-                state=effective_state,
+                state="queued" if effective_state == "ready" else effective_state,
             )
         )
     return assignments
