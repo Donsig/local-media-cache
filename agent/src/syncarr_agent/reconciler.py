@@ -161,9 +161,10 @@ def _handle_ready(
             # status == 'active': check aria2
             info = aria2.get_status(record.gid)
             if info.status in (DownloadStatus.ACTIVE, DownloadStatus.WAITING):
-                # In-progress — report bytes downloaded so far (best-effort).
-                if info.completed_length > 0:
-                    server.report_progress(asset_id, info.completed_length)
+                # Report bytes downloaded so far. completed_length=0 while in
+                # aria2's WAITING queue — the server uses this as an
+                # acknowledgement that the agent has accepted the assignment.
+                server.report_progress(asset_id, info.completed_length)
                 return
 
             if info.status == DownloadStatus.COMPLETE:

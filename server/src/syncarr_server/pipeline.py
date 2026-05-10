@@ -67,6 +67,10 @@ def _waiting_detail(asset: Asset, now: datetime) -> str:
 
 
 def _is_stalled(assignment: Assignment, now: datetime, poll_interval_seconds: int) -> bool:
+    # An item at 0 bytes is still in the agent's aria2 queue — not yet started,
+    # so stall detection doesn't apply.
+    if not assignment.bytes_downloaded:
+        return False
     if assignment.bytes_downloaded_updated_at is None:
         return False
     threshold = timedelta(seconds=max(2 * poll_interval_seconds, 120))
@@ -172,23 +176,25 @@ def project(
     raw_bytes = assignment.bytes_downloaded
     clamped = max(0, raw_bytes) if raw_bytes is not None else None
 
-    if asset.size_bytes is None:
+    if clamped is None:
+        # Agent has not acknowledged this assignment yet.
         return PipelineProjection(
             visible=True,
             status="queued",
             substate="waiting_for_agent",
             detail=_waiting_detail(asset, now),
-            bytes_downloaded=clamped,
+            bytes_downloaded=None,
+            size_bytes=asset.size_bytes,
         )
 
-    if clamped is None or clamped <= 0:
+    if asset.size_bytes is None:
+        # Agent has the item in aria2 (bytes_downloaded=0) or is actively
+        # downloading, but we don't yet know the total size. Show indeterminate.
         return PipelineProjection(
             visible=True,
-            status="queued",
-            substate="waiting_for_agent",
-            detail=_waiting_detail(asset, now),
+            status="transferring",
+            substate="downloading",
             bytes_downloaded=clamped,
-            size_bytes=asset.size_bytes,
         )
 
     if clamped >= asset.size_bytes:

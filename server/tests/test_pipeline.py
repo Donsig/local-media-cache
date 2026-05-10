@@ -156,8 +156,12 @@ def test_row9_bytes_downloaded_none_waiting_for_agent() -> None:
     assert proj(assignment=make_assignment(bytes_downloaded=None)).substate == "waiting_for_agent"
 
 
-def test_row9_bytes_downloaded_zero_waiting_for_agent() -> None:
-    assert proj(assignment=make_assignment(bytes_downloaded=0)).substate == "waiting_for_agent"
+def test_row9_bytes_downloaded_zero_agent_acknowledged() -> None:
+    # bytes_downloaded=0 means the agent has the item in its aria2 queue
+    # (acknowledged) — show as transferring, not waiting_for_agent.
+    result = proj(assignment=make_assignment(bytes_downloaded=0))
+    assert result.status == "transferring"
+    assert result.substate == "downloading"
 
 
 def test_row10_bytes_gte_size_verifying_with_sha256() -> None:
@@ -254,8 +258,11 @@ def test_verifying_suppresses_rate_and_eta() -> None:
     assert result.transfer_rate_bps is None
 
 
-def test_bytes_negative_treated_as_zero() -> None:
-    assert proj(assignment=make_assignment(bytes_downloaded=-1)).substate == "waiting_for_agent"
+def test_bytes_negative_clamped_to_zero_agent_acknowledged() -> None:
+    # Negative bytes_downloaded is clamped to 0 — treated as acknowledged by agent.
+    result = proj(assignment=make_assignment(bytes_downloaded=-1))
+    assert result.status == "transferring"
+    assert result.substate == "downloading"
 
 
 def test_confirm_error_downloading_within_window() -> None:

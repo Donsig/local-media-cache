@@ -250,6 +250,12 @@ async def update_assignment_progress(
             (client.id, asset_id),
             RateSample(at=now, bytes_downloaded=new_bytes),
         )
+    elif new_bytes == 0 and assignment.bytes_downloaded is None:
+        # First report from agent while item is in aria2's WAITING queue.
+        # Mark as acknowledged (0 bytes) so the UI shows "transferring" rather
+        # than "waiting for agent to pick up".
+        assignment.bytes_downloaded = 0
+        assignment.bytes_downloaded_updated_at = now
     elif new_bytes < current:
         logger.warning(
             "bytes_downloaded_decreased",
