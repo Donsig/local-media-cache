@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query'
 import {
   createSubscription,
+  createSubscriptionsBatch,
   deleteSubscription,
   getClientAssignments,
   getClients,
@@ -382,21 +383,21 @@ function BulkSyncPill({
   const createMutation = useMutation({
     mutationFn: async (profileId: string) => {
       if (scopeType === 'show:seasons') {
-        // Subscribe each unsubscribed episode individually — same as clicking each one.
+        // Subscribe all unsubscribed episodes in one batch request — single resolver run.
         const unsubscribed = childMediaItemIds.filter(
           (id) => !childSubs.some((s) => s.media_item_id === id),
         )
-        await Promise.all(
-          unsubscribed.map((episodeId) =>
-            createSubscription({
+        if (unsubscribed.length > 0) {
+          await createSubscriptionsBatch(
+            unsubscribed.map((episodeId) => ({
               client_id: client.id,
               media_item_id: episodeId,
               scope_type: 'episode',
               scope_params: null,
               profile_id: profileId,
-            }),
-          ),
-        )
+            })),
+          )
+        }
         return
       }
       await createSubscription({

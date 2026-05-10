@@ -30,6 +30,7 @@ from syncarr_server.schemas import (
     ProfileSchema,
     ProfilesResponse,
     ProfileUpdateRequest,
+    SubscriptionBatchCreateRequest,
     SubscriptionCreateRequest,
     SubscriptionSchema,
     SubscriptionScopeType,
@@ -425,6 +426,43 @@ async def create_subscription(
     await session.commit()
     await resolve_all_subscriptions(provider=_provider(request), session=session)
     return _subscription_schema(subscription)
+
+
+@router.post(
+    "/subscriptions/batch",
+    response_model=SubscriptionsResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def create_subscriptions_batch(
+    payload: SubscriptionBatchCreateRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SubscriptionsResponse:
+    """Create multiple subscriptions in one transaction, resolve once."""
+    now = _utc_now()
+    created: list[Subscription] = []
+    for item in payload.subscriptions:
+        client = await _get_client(session, item.client_id)
+        if client.decommissioning:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Client {item.client_id!r} is decommissioning",
+            )
+        await _get_profile(session, item.profile_id)
+        subscription = Subscription(
+            client_id=item.client_id,
+            media_item_id=item.media_item_id,
+            scope_type=_stored_scope_type(item.scope_type),
+            scope_params=item.scope_params,
+            profile_id=item.profile_id,
+            created_at=now,
+        )
+        session.add(subscription)
+        created.append(subscription)
+    await session.commit()
+    await resolve_all_subscriptions(provider=_provider(request), session=session)
+    return SubscriptionsResponse(subscriptions=[_subscription_schema(s) for s in created])
 
 
 @router.patch(

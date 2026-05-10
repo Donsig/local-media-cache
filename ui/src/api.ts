@@ -163,6 +163,21 @@ export async function getQueue(params?: {
   return request<{ rows: QueueRow[] }>(`/api/queue${qs ? `?${qs}` : ''}`)
 }
 
+export async function createSubscriptionsBatch(
+  items: Array<{
+    client_id: string
+    media_item_id: string
+    scope_type: string
+    scope_params: Record<string, unknown> | null
+    profile_id: string
+  }>,
+): Promise<void> {
+  await request<unknown>('/api/subscriptions/batch', {
+    method: 'POST',
+    body: { subscriptions: items },
+  })
+}
+
 export async function retryQueueItem(clientId: string, assetId: number): Promise<void> {
   return request<void>(`/api/queue/${clientId}/${assetId}/retry`, { method: 'POST' })
 }

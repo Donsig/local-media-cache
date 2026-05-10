@@ -156,6 +156,10 @@ class SubscriptionSchema(Schema):
     created_at: datetime
 
 
+class SubscriptionBatchCreateRequest(Schema):
+    subscriptions: list[SubscriptionCreateRequest]
+
+
 class SubscriptionsResponse(Schema):
     subscriptions: list[SubscriptionSchema]
 
