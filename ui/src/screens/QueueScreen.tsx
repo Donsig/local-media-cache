@@ -125,7 +125,8 @@ function QueueRowItem({ row }: { row: QueueRow }) {
       <div className="queue-row__meta">
         <span className="queue-row__profile">{row.profile_id}</span>
         <span className="queue-row__size">{formatBytes(row.size_bytes)}</span>
-        {row.pipeline_substate === 'waiting_for_agent' ? (
+        {row.pipeline_substate === 'waiting_for_agent' &&
+        Date.now() - new Date(row.created_at).getTime() > 10 * 60 * 1000 ? (
           <button
             type="button"
             className="btn btn--small btn--secondary"
