@@ -328,25 +328,35 @@ function BulkSyncPill({
     staleTime: 30_000,
   })
 
+  // For show:all pills: find a matching show-level subscription.
+  // For show:seasons pills: only find a show:all sub (to detect coverage); season
+  // subscriptions are now individual per-episode subs, not a show:seasons row.
   const matchingSub = useMemo(() => {
     return subsQuery.data?.find((sub) => {
       if (sub.media_item_id !== showId) return false
       if (scopeType === 'show:seasons' && sub.scope_type === 'show:all') return true
       if (sub.scope_type !== scopeType) return false
-      if (scopeType === 'show:seasons') {
-        const subSeasons = sub.scope_params?.seasons as number[] | undefined
-        const wantedSeasons = (scopeParams?.seasons ?? []) as number[]
-        return wantedSeasons.every((s) => subSeasons?.includes(s))
-      }
+      if (scopeType === 'show:seasons') return false
       return true
     })
-  }, [subsQuery.data, showId, scopeType, scopeParams])
+  }, [subsQuery.data, showId, scopeType])
+
+  // For show:seasons: individual episode-level subscriptions created by this pill.
+  const childSubs = useMemo(() => {
+    if (scopeType !== 'show:seasons' || childMediaItemIds.length === 0) return []
+    return subsQuery.data?.filter((sub) => childMediaItemIds.includes(sub.media_item_id)) ?? []
+  }, [scopeType, childMediaItemIds, subsQuery.data])
 
   const isCoveredByShowAll =
     scopeType === 'show:seasons' &&
     Boolean(matchingSub) &&
     matchingSub?.scope_type === 'show:all'
-  const isSubscribed = Boolean(matchingSub)
+  const isSubscribed =
+    scopeType === 'show:seasons'
+      ? isCoveredByShowAll ||
+        (childMediaItemIds.length > 0 &&
+          childMediaItemIds.every((id) => childSubs.some((s) => s.media_item_id === id)))
+      : Boolean(matchingSub)
   const bulkPipelineStatus = useMemo((): PipelineStatus | null => {
     if (!isSubscribed) return null
     const statuses = childMediaItemIds
@@ -370,14 +380,33 @@ function BulkSyncPill({
   }
 
   const createMutation = useMutation({
-    mutationFn: (profileId: string) =>
-      createSubscription({
+    mutationFn: async (profileId: string) => {
+      if (scopeType === 'show:seasons') {
+        // Subscribe each unsubscribed episode individually — same as clicking each one.
+        const unsubscribed = childMediaItemIds.filter(
+          (id) => !childSubs.some((s) => s.media_item_id === id),
+        )
+        await Promise.all(
+          unsubscribed.map((episodeId) =>
+            createSubscription({
+              client_id: client.id,
+              media_item_id: episodeId,
+              scope_type: 'episode',
+              scope_params: null,
+              profile_id: profileId,
+            }),
+          ),
+        )
+        return
+      }
+      await createSubscription({
         client_id: client.id,
         media_item_id: showId,
         scope_type: scopeType,
         scope_params: scopeParams,
         profile_id: profileId,
-      }),
+      })
+    },
     onSuccess: () => {
       closePopover()
       invalidate()
@@ -389,10 +418,22 @@ function BulkSyncPill({
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
+      if (scopeType === 'show:seasons') {
+        // Delete all individual episode subscriptions for this season.
+        if (childSubs.length === 0) throw new Error('No subscriptions found')
+        await Promise.all(childSubs.map((sub) => deleteSubscription(sub.id)))
+        return
+      }
       if (!matchingSub) throw new Error('Subscription not found')
       await deleteSubscription(matchingSub.id)
+      await Promise.all(
+        (subsQuery.data?.filter((sub) => childMediaItemIds.includes(sub.media_item_id)) ?? []).map(
+          (sub) => deleteSubscription(sub.id),
+        ),
+      )
     },
     onSuccess: () => {
+      closePopover()
       setErrorMessage(null)
       invalidate()
     },
@@ -402,7 +443,7 @@ function BulkSyncPill({
   })
 
   const showForm = pickerOpen && !isSubscribed
-  const showPopover = showForm || errorMessage !== null
+  const showPopover = showForm || (pickerOpen && isSubscribed) || errorMessage !== null
   const isBusy = createMutation.isPending || deleteMutation.isPending || subsQuery.isLoading
 
   useEffect(() => {
@@ -425,12 +466,16 @@ function BulkSyncPill({
       <button
         type="button"
         className={episodePillClassName(bulkPipelineStatus)}
-        disabled={isBusy || isCoveredByShowAll}
+        disabled={
+          isBusy ||
+          isCoveredByShowAll ||
+          (scopeType === 'show:seasons' && childMediaItemIds.length === 0 && !isSubscribed)
+        }
         onClick={(event) => {
           event.stopPropagation()
           setErrorMessage(null)
           if (isSubscribed) {
-            deleteMutation.mutate()
+            setPickerOpen((v) => !v)
           } else {
             setPickerOpen((v) => !v)
           }
@@ -464,6 +509,12 @@ function BulkSyncPill({
                 </div>
               ) : null}
             </>
+          ) : pickerOpen && isSubscribed && !errorMessage ? (
+            <div>
+              {scopeType === 'show:seasons'
+                ? 'Unsubscribe from this season?'
+                : 'Unsubscribe from this show?'}
+            </div>
           ) : null}
 
           {errorMessage ? (
@@ -480,9 +531,18 @@ function BulkSyncPill({
               >
                 Subscribe
               </Btn>
+            ) : pickerOpen && isSubscribed && !errorMessage ? (
+              <Btn
+                size="small"
+                variant="primary"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate()}
+              >
+                Unsubscribe
+              </Btn>
             ) : null}
             <Btn size="small" onClick={closePopover}>
-              {showForm ? 'Cancel' : 'Close'}
+              {showForm || (pickerOpen && isSubscribed && !errorMessage) ? 'Cancel' : 'Close'}
             </Btn>
           </div>
         </div>
