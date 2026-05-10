@@ -15,6 +15,8 @@ from syncarr_agent.reconciler import reconcile, run_reconcile
 from syncarr_agent.state import StateDB
 
 RECONCILE_INTERVAL_SECONDS = 24 * 3600
+# Poll aggressively while downloads are in progress; back off when idle.
+ACTIVE_POLL_INTERVAL_SECONDS = 15
 
 
 def run(config_path: Path) -> None:
@@ -56,10 +58,13 @@ def run(config_path: Path) -> None:
             if time.time() - last_reconcile >= RECONCILE_INTERVAL_SECONDS:
                 run_reconcile(state, server, config.library_root, log)
                 last_reconcile = time.time()
+            active = response.stats.queued_count > 0
         except Exception as exc:
             log.warning("agent.poll_error", error=str(exc))
+            active = False
 
-        time.sleep(config.poll_interval_seconds)
+        interval = ACTIVE_POLL_INTERVAL_SECONDS if active else config.poll_interval_seconds
+        time.sleep(interval)
 
 
 def cli() -> None:
