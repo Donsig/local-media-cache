@@ -156,8 +156,14 @@ export function QueueScreen() {
   const queueQuery = useQuery({
     queryKey: ['queue'],
     queryFn: () => getQueue(),
-    staleTime: 10_000,
-    refetchInterval: 15_000,
+    staleTime: 3_000,
+    refetchInterval: (query) => {
+      const rows = query.state.data?.rows ?? []
+      const active = rows.some(
+        (r) => r.pipeline_status === 'transferring' || r.pipeline_status === 'queued',
+      )
+      return active ? 5_000 : 30_000
+    },
   })
 
   const rows = queueQuery.data?.rows ?? []
