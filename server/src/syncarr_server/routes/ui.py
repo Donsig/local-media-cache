@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from syncarr_server.auth import require_ui_auth
@@ -570,6 +570,31 @@ async def get_queue(
 
     rows.sort(key=lambda row: _PIPELINE_SORT_ORDER.get(row.pipeline_status, 99))
     return QueueResponse(rows=rows)
+
+
+@router.post(
+    "/queue/{client_id}/{asset_id}/retry",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def retry_queue_item(
+    client_id: str,
+    asset_id: int,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """Delete the assignment and re-resolve so the agent sees a fresh pickup."""
+    result = await session.execute(
+        delete(Assignment).where(
+            Assignment.client_id == client_id,
+            Assignment.asset_id == asset_id,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    await session.commit()
+    await resolve_all_subscriptions(provider=_provider(request), session=session)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

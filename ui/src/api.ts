@@ -162,3 +162,7 @@ export async function getQueue(params?: {
   const qs = search.toString()
   return request<{ rows: QueueRow[] }>(`/api/queue${qs ? `?${qs}` : ''}`)
 }
+
+export async function retryQueueItem(clientId: string, assetId: number): Promise<void> {
+  return request<void>(`/api/queue/${clientId}/${assetId}/retry`, { method: 'POST' })
+}

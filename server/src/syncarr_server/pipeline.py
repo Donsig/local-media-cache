@@ -52,6 +52,20 @@ def _is_client_offline(client: Client | None, now: datetime, poll_interval_secon
     return (now - _utc(client.last_seen)) > threshold
 
 
+def _waiting_detail(asset: Asset, now: datetime) -> str:
+    base = "waiting for agent to pick up"
+    if asset.ready_at is None:
+        return base
+    elapsed = (now - _utc(asset.ready_at)).total_seconds()
+    if elapsed < 300:
+        return base
+    if elapsed < 3600:
+        return f"{base} · {int(elapsed / 60)}m"
+    if elapsed < 86400:
+        return f"{base} · {int(elapsed / 3600)}h"
+    return f"{base} · {int(elapsed / 86400)}d"
+
+
 def _is_stalled(assignment: Assignment, now: datetime, poll_interval_seconds: int) -> bool:
     if assignment.bytes_downloaded_updated_at is None:
         return False
@@ -163,7 +177,7 @@ def project(
             visible=True,
             status="queued",
             substate="waiting_for_agent",
-            detail="waiting for agent to pick up",
+            detail=_waiting_detail(asset, now),
             bytes_downloaded=clamped,
         )
 
@@ -172,7 +186,7 @@ def project(
             visible=True,
             status="queued",
             substate="waiting_for_agent",
-            detail="waiting for agent to pick up",
+            detail=_waiting_detail(asset, now),
             bytes_downloaded=clamped,
             size_bytes=asset.size_bytes,
         )

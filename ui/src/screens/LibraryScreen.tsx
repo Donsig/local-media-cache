@@ -523,14 +523,27 @@ function BulkSyncPill({
 
           <div className="sync-pill-picker__actions">
             {showForm ? (
-              <Btn
-                size="small"
-                variant="primary"
-                disabled={createMutation.isPending || !selectedProfileId || profiles.length === 0}
-                onClick={() => createMutation.mutate(selectedProfileId)}
-              >
-                Subscribe
-              </Btn>
+              <>
+                <Btn
+                  size="small"
+                  variant="primary"
+                  disabled={createMutation.isPending || !selectedProfileId || profiles.length === 0}
+                  onClick={() => createMutation.mutate(selectedProfileId)}
+                >
+                  {scopeType === 'show:seasons' && childSubs.length > 0
+                    ? 'Subscribe remaining'
+                    : 'Subscribe'}
+                </Btn>
+                {scopeType === 'show:seasons' && childSubs.length > 0 ? (
+                  <Btn
+                    size="small"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => deleteMutation.mutate()}
+                  >
+                    Unsubscribe all
+                  </Btn>
+                ) : null}
+              </>
             ) : pickerOpen && isSubscribed && !errorMessage ? (
               <Btn
                 size="small"

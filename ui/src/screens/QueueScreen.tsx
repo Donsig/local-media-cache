@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getQueue } from '../api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getQueue, retryQueueItem } from '../api'
 import { Badge } from '../components/Badge'
 import { PillTabs } from '../components/PillTabs'
 import type { PipelineStatus, QueueRow } from '../types'
@@ -52,6 +52,12 @@ function parseShowGroup(filename: string): string {
 }
 
 function QueueRowItem({ row }: { row: QueueRow }) {
+  const queryClient = useQueryClient()
+  const retryMutation = useMutation({
+    mutationFn: () => retryQueueItem(row.client_id, row.asset_id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['queue'] }),
+  })
+
   const isTransferring = row.pipeline_status === 'transferring'
   const isVerifying = row.pipeline_substate === 'verifying'
   const isStalled = row.pipeline_substate === 'stalled'
@@ -119,6 +125,17 @@ function QueueRowItem({ row }: { row: QueueRow }) {
       <div className="queue-row__meta">
         <span className="queue-row__profile">{row.profile_id}</span>
         <span className="queue-row__size">{formatBytes(row.size_bytes)}</span>
+        {row.pipeline_substate === 'waiting_for_agent' ? (
+          <button
+            type="button"
+            className="btn btn--small btn--secondary"
+            disabled={retryMutation.isPending}
+            onClick={() => retryMutation.mutate()}
+            title="Force a fresh download attempt"
+          >
+            {retryMutation.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        ) : null}
       </div>
     </div>
   )
