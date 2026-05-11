@@ -1,3 +1,0 @@
-Created the review at [2026-05-08-pipeline-status-redesign-review-codex.md](D:/dev/Workspaces/Syncarr/local-media-cache/docs/superpowers/specs/2026-05-08-pipeline-status-redesign-review-codex.md).
-
-I only wrote the requested review file. No implementation changes, spec edits, or scaffolding. I also noticed other untracked files already present under `docs/superpowers/specs/` and left them untouched.
