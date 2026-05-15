@@ -91,6 +91,28 @@ def reconcile(
                 log=bound,
             )
 
+    if server.transfer_mode == "stopped":
+        for record in state.all():
+            if record.status != "active":
+                continue
+            try:
+                aria2.remove(record.gid)
+            except Exception as exc:
+                log.error(
+                    "agent.stop_aria2_remove_failed",
+                    asset_id=record.asset_id,
+                    gid=record.gid,
+                    error=str(exc),
+                )
+                continue
+            _delete_control_file(record.local_path)
+            state.delete(record.asset_id)
+            log.info(
+                "agent.stop_cancelled_download",
+                asset_id=record.asset_id,
+                gid=record.gid,
+            )
+
 
 def run_reconcile(
     state: StateDB,

@@ -35,7 +35,9 @@ async def _seed_profile(session: AsyncSession, profile_id: str = "p1") -> None:
     await session.commit()
 
 
-async def _seed_client(session: AsyncSession, client_id: str = "c1", last_seen: datetime | None = None) -> None:
+async def _seed_client(
+    session: AsyncSession, client_id: str = "c1", last_seen: datetime | None = None
+) -> None:
     c = Client()
     c.id = client_id
     c.name = client_id.title()

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from syncarr_server.auth import require_ui_auth
 from syncarr_server.config import get_settings
 from syncarr_server.db import get_session
-from syncarr_server.models import Asset, Assignment, Client, Profile, Subscription
+from syncarr_server.models import Asset, Assignment, Client, Profile, ServerState, Subscription
 from syncarr_server.pipeline import project
 from syncarr_server.providers.base import MediaProvider
 from syncarr_server.resolver import resolve_all_subscriptions
@@ -24,18 +24,21 @@ from syncarr_server.schemas import (
     ClientSchema,
     ClientsResponse,
     ClientUpdateRequest,
-    QueueResponse,
-    QueueRowSchema,
     ProfileCreateRequest,
     ProfileSchema,
     ProfilesResponse,
     ProfileUpdateRequest,
+    QueueResponse,
+    QueueRowSchema,
     SubscriptionBatchCreateRequest,
     SubscriptionCreateRequest,
     SubscriptionSchema,
     SubscriptionScopeType,
     SubscriptionsResponse,
     SubscriptionUpdateRequest,
+    TransferMode,
+    TransferModeRequest,
+    TransferModeResponse,
     validate_subscription_scope,
 )
 from syncarr_server.services.rate_tracker import rate_tracker
@@ -102,6 +105,13 @@ def _stored_scope_type(scope_type: SubscriptionScopeType) -> SubscriptionScopeTy
     if scope_type == "episode":
         return "movie"
     return scope_type
+
+
+async def _get_transfer_mode(session: AsyncSession) -> TransferMode:
+    state = await session.get(ServerState, 1)
+    if state is None:
+        return "running"
+    return cast(TransferMode, state.transfer_mode)
 
 
 async def _get_client(session: AsyncSession, client_id: str) -> Client:
@@ -235,6 +245,7 @@ async def list_client_assignments(
     client = await _get_client(session, client_id)
     settings = get_settings()
     now = datetime.now(UTC)
+    transfer_mode = await _get_transfer_mode(session)
 
     ids = [id_.strip() for id_ in media_item_ids.split(",") if id_.strip()]
 
@@ -259,6 +270,7 @@ async def list_client_assignments(
             now=now,
             poll_interval_seconds=settings.agent_poll_interval_seconds,
             rate_samples=samples,
+            transfer_mode=transfer_mode,
         )
         if not p.visible:
             continue
@@ -282,6 +294,36 @@ async def list_client_assignments(
             )
         )
     return assignments
+
+
+@router.get(
+    "/transfer-mode",
+    response_model=TransferModeResponse,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def get_transfer_mode(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TransferModeResponse:
+    return TransferModeResponse(transfer_mode=await _get_transfer_mode(session))
+
+
+@router.put(
+    "/transfer-mode",
+    response_model=TransferModeResponse,
+    dependencies=[Depends(require_ui_auth)],
+)
+async def update_transfer_mode(
+    payload: TransferModeRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TransferModeResponse:
+    state = await session.get(ServerState, 1)
+    if state is None:
+        state = ServerState(id=1, transfer_mode=payload.transfer_mode)
+        session.add(state)
+    else:
+        state.transfer_mode = payload.transfer_mode
+    await session.commit()
+    return TransferModeResponse(transfer_mode=payload.transfer_mode)
 
 
 @router.get(
@@ -560,6 +602,7 @@ async def get_queue(
 ) -> QueueResponse:
     settings = get_settings()
     now = datetime.now(UTC)
+    transfer_mode = await _get_transfer_mode(session)
 
     query = (
         select(Assignment, Asset, Client)
@@ -582,6 +625,7 @@ async def get_queue(
             now=now,
             poll_interval_seconds=settings.agent_poll_interval_seconds,
             rate_samples=samples,
+            transfer_mode=transfer_mode,
         )
         if not p.visible:
             continue

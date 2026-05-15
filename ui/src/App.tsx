@@ -1,9 +1,13 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { getTransferMode, setTransferMode } from './api'
+import { Btn } from './components/Btn'
 import { ClientsScreen } from './screens/ClientsScreen'
 import { LibraryScreen } from './screens/LibraryScreen'
 import { ProfilesScreen } from './screens/ProfilesScreen'
 import { QueueScreen } from './screens/QueueScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import type { TransferMode } from './types'
 
 type Section = 'library' | 'queue' | 'clients' | 'profiles' | 'settings'
 
@@ -23,6 +27,17 @@ const navItems: NavItem[] = [
 
 function App() {
   const [activeSection, setActiveSection] = useState<Section>('library')
+  const queryClient = useQueryClient()
+  const modeQuery = useQuery({
+    queryKey: ['transfer-mode'],
+    queryFn: getTransferMode,
+    refetchInterval: 15000,
+  })
+  const modeMutation = useMutation({
+    mutationFn: setTransferMode,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['transfer-mode'] }),
+  })
+  const mode: TransferMode = modeQuery.data?.transfer_mode ?? 'running'
 
   const screen = useMemo(() => {
     switch (activeSection) {
@@ -68,6 +83,28 @@ function App() {
             )
           })}
         </nav>
+
+        <div
+          className="sidebar-controls"
+          style={{ marginTop: 'auto', display: 'grid', gap: 8 }}
+        >
+          <Btn
+            variant={mode === 'paused' ? 'primary' : 'secondary'}
+            size="small"
+            disabled={modeMutation.isPending}
+            onClick={() => modeMutation.mutate(mode === 'paused' ? 'running' : 'paused')}
+          >
+            {mode === 'paused' ? 'Resume' : 'Pause'}
+          </Btn>
+          <Btn
+            variant={mode === 'stopped' ? 'danger' : 'secondary'}
+            size="small"
+            disabled={modeMutation.isPending}
+            onClick={() => modeMutation.mutate(mode === 'stopped' ? 'running' : 'stopped')}
+          >
+            {mode === 'stopped' ? 'Resume' : 'Stop'}
+          </Btn>
+        </div>
       </aside>
 
       <main className="main-panel">{screen}</main>

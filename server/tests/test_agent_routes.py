@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from syncarr_server.models import Asset, Assignment, Client, Profile
+from syncarr_server.models import Asset, Assignment, Client, Profile, ServerState
 
 from .conftest import AgentTestFiles
 
@@ -100,6 +100,15 @@ async def _get_assignment(
     return result.scalar_one_or_none()
 
 
+async def _set_transfer_mode(session: AsyncSession, transfer_mode: str) -> None:
+    state = await session.get(ServerState, 1)
+    if state is None:
+        session.add(ServerState(id=1, transfer_mode=transfer_mode))
+    else:
+        state.transfer_mode = transfer_mode
+    await session.commit()
+
+
 async def test_assignments_returns_ready_state(
     http_client: AsyncClient,
     auth_headers_agent: dict[str, str],
@@ -122,6 +131,67 @@ async def test_assignments_returns_ready_state(
     assert assignment["state"] == "ready"
     assert assignment["sha256"] == agent_test_files.cache_sha256
     assert assignment["download_url"] == f"/download/{asset_id}"
+    assert response.json()["transfer_mode"] == "running"
+
+
+async def test_assignments_ready_stays_ready_when_running_mode(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    await _set_transfer_mode(db_session, "running")
+    await _create_asset_assignment(
+        db_session,
+        client_id=agent_client.id,
+        files=agent_test_files,
+    )
+
+    response = await http_client.get("/assignments", headers=auth_headers_agent)
+
+    assert response.json()["assignments"][0]["state"] == "ready"
+    assert response.json()["transfer_mode"] == "running"
+
+
+async def test_assignments_ready_becomes_queued_when_paused(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    await _set_transfer_mode(db_session, "paused")
+    await _create_asset_assignment(
+        db_session,
+        client_id=agent_client.id,
+        files=agent_test_files,
+    )
+
+    response = await http_client.get("/assignments", headers=auth_headers_agent)
+
+    assert response.json()["assignments"][0]["state"] == "queued"
+    assert response.json()["transfer_mode"] == "paused"
+
+
+async def test_assignments_ready_becomes_queued_when_stopped(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    await _set_transfer_mode(db_session, "stopped")
+    await _create_asset_assignment(
+        db_session,
+        client_id=agent_client.id,
+        files=agent_test_files,
+    )
+
+    response = await http_client.get("/assignments", headers=auth_headers_agent)
+
+    assert response.json()["assignments"][0]["state"] == "queued"
+    assert response.json()["transfer_mode"] == "stopped"
 
 
 async def test_assignments_returns_queued_state(
@@ -243,6 +313,27 @@ async def test_assignments_evict_overrides_ready(
     assert assignment["state"] == "evict"
     assert "sha256" not in assignment
     assert "download_url" not in assignment
+
+
+async def test_assignments_evict_overrides_stopped_mode(
+    http_client: AsyncClient,
+    auth_headers_agent: dict[str, str],
+    agent_client: Client,
+    agent_test_files: AgentTestFiles,
+    db_session: AsyncSession,
+) -> None:
+    await _set_transfer_mode(db_session, "stopped")
+    await _create_asset_assignment(
+        db_session,
+        client_id=agent_client.id,
+        files=agent_test_files,
+        assignment_state="evict",
+    )
+
+    response = await http_client.get("/assignments", headers=auth_headers_agent)
+
+    assert response.json()["assignments"][0]["state"] == "evict"
+    assert response.json()["transfer_mode"] == "stopped"
 
 
 async def test_assignments_updates_last_seen(
@@ -887,7 +978,7 @@ async def test_confirm_passthrough_rejects_wrong_size(
     agent_test_files: AgentTestFiles,
     db_session: AsyncSession,
 ) -> None:
-    """Passthrough assets (sha256=None) still fail confirm when size_bytes doesn't match (bug #33)."""
+    """Passthrough size-only confirms still reject mismatched sizes."""
     asset_id = await _create_passthrough_null_sha256(
         db_session, agent_client.id, agent_test_files, size_bytes=1_000_000
     )
@@ -1118,7 +1209,9 @@ async def test_confirm_success_clears_error_columns(
     await _ensure_profile(db_session)
     await _create_ready_asset_and_assignment(db_session, client_id=agent_client.id)
     await db_session.execute(
-        update(Assignment).where(Assignment.asset_id == 99).values(
+        update(Assignment)
+        .where(Assignment.asset_id == 99)
+        .values(
             last_confirm_error_at=datetime(2026, 1, 1, tzinfo=UTC),
             last_confirm_error_reason="checksum_mismatch",
         ),

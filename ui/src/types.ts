@@ -40,10 +40,12 @@ export type ClientAssignment = {
 }
 
 export type PipelineStatus = 'queued' | 'transferring' | 'ready' | 'failed'
+export type TransferMode = 'running' | 'paused' | 'stopped'
 
 export type PipelineSubstate =
   | 'transcoding_pending'
   | 'transcoding'
+  | 'paused'
   | 'waiting_for_agent'
   | 'agent_offline'
   | 'downloading'

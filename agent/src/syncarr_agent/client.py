@@ -36,6 +36,7 @@ class AssignmentsResponse:
     stats: AssignmentsStats = field(
         default_factory=lambda: AssignmentsStats(0, 0, 0, 0)
     )
+    transfer_mode: str = "running"
 
 
 @dataclass
@@ -53,6 +54,7 @@ class ServerClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._server_url = server_url.rstrip("/")
+        self.transfer_mode = "running"
         kwargs: dict[str, Any] = {
             "base_url": self._server_url,
             "headers": {"Authorization": f"Bearer {token}"},
@@ -73,6 +75,7 @@ class ServerClient:
             queued_count=int(raw_stats.get("queued_count", 0)),
             evict_count=int(raw_stats.get("evict_count", 0)),
         )
+        self.transfer_mode = str(data.get("transfer_mode", "running"))
 
         assignments: list[AssignmentItem] = []
         for raw in data.get("assignments", []):
@@ -101,6 +104,7 @@ class ServerClient:
             server_time=data["server_time"],
             assignments=assignments,
             stats=stats,
+            transfer_mode=self.transfer_mode,
         )
 
     def confirm_delivered(

@@ -10,6 +10,7 @@ import type {
   Profile,
   QueueRow,
   Subscription,
+  TransferMode,
 } from './types'
 
 type RequestOptions = Omit<RequestInit, 'body'> & {
@@ -180,4 +181,17 @@ export async function createSubscriptionsBatch(
 
 export async function retryQueueItem(clientId: string, assetId: number): Promise<void> {
   return request<void>(`/api/queue/${clientId}/${assetId}/retry`, { method: 'POST' })
+}
+
+export async function getTransferMode(): Promise<{ transfer_mode: TransferMode }> {
+  return request<{ transfer_mode: TransferMode }>('/api/transfer-mode')
+}
+
+export async function setTransferMode(
+  mode: TransferMode,
+): Promise<{ transfer_mode: TransferMode }> {
+  return request<{ transfer_mode: TransferMode }>('/api/transfer-mode', {
+    method: 'PUT',
+    body: { transfer_mode: mode },
+  })
 }

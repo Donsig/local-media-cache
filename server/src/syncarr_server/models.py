@@ -12,6 +12,13 @@ class Base(DeclarativeBase):
     pass
 
 
+class ServerState(Base):
+    __tablename__ = "server_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    transfer_mode: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+
+
 class Client(Base):
     __tablename__ = "clients"
 

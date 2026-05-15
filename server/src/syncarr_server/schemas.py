@@ -49,6 +49,7 @@ class MediaPreviewResponse(BaseModel):
 
 
 SubscriptionScopeType = Literal["movie", "episode", "show:all", "show:seasons"]
+TransferMode = Literal["running", "paused", "stopped"]
 
 
 def validate_subscription_scope(
@@ -213,6 +214,7 @@ class AgentAssignmentsResponse(Schema):
     server_time: datetime
     assignments: list[AgentAssignmentSchema]
     stats: AgentAssignmentsStats
+    transfer_mode: TransferMode = "running"
 
 
 class AgentConfirmRequest(Schema):
@@ -261,3 +263,11 @@ class QueueRowSchema(Schema):
 
 class QueueResponse(Schema):
     rows: list[QueueRowSchema]
+
+
+class TransferModeResponse(Schema):
+    transfer_mode: TransferMode
+
+
+class TransferModeRequest(Schema):
+    transfer_mode: TransferMode

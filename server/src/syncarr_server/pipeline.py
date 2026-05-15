@@ -11,6 +11,7 @@ PipelineStatus = Literal["queued", "transferring", "ready", "failed"]
 PipelineSubstate = Literal[
     "transcoding_pending",
     "transcoding",
+    "paused",
     "waiting_for_agent",
     "agent_offline",
     "downloading",
@@ -115,6 +116,7 @@ def project(
     poll_interval_seconds: int,
     rate_samples: Sequence[RateSample] = (),
     confirm_error_recent_window_seconds: int = 3600,
+    transfer_mode: str = "running",
 ) -> PipelineProjection:
     if assignment is None:
         return PipelineProjection(visible=False)
@@ -155,6 +157,19 @@ def project(
             status="queued",
             substate="transcoding",
             detail="transcoding on server",
+            size_bytes=asset.size_bytes,
+        )
+
+    if (
+        transfer_mode in ("paused", "stopped")
+        and asset.status == "ready"
+        and assignment.state == "pending"
+    ):
+        return PipelineProjection(
+            visible=True,
+            status="queued",
+            substate="paused",
+            detail="transfers paused" if transfer_mode == "paused" else "transfers stopped",
             size_bytes=asset.size_bytes,
         )
 

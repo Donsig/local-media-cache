@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from syncarr_server.auth import require_agent_auth
 from syncarr_server.config import Settings, get_settings
 from syncarr_server.db import get_session
-from syncarr_server.models import Asset, Assignment, Client
+from syncarr_server.models import Asset, Assignment, Client, ServerState
 from syncarr_server.pipeline import RateSample
 from syncarr_server.resolver import delete_cache_files, gc_orphaned_assets
 from syncarr_server.schemas import (
@@ -26,6 +26,7 @@ from syncarr_server.schemas import (
     AgentProgressRequest,
     ReconcileRequest,
     ReconcileResponse,
+    TransferMode,
 )
 from syncarr_server.services.rate_tracker import rate_tracker
 
@@ -43,12 +44,25 @@ def _relative_path(source_path: str, local_path_prefix: str) -> str:
         return Path(source_path).name
 
 
-def _effective_state(assignment: Assignment, asset: Asset) -> AgentAssignmentState | None:
+async def _get_transfer_mode(session: AsyncSession) -> TransferMode:
+    state = await session.get(ServerState, 1)
+    if state is None:
+        return "running"
+    return cast(TransferMode, state.transfer_mode)
+
+
+def _effective_state(
+    assignment: Assignment,
+    asset: Asset,
+    transfer_mode: str,
+) -> AgentAssignmentState | None:
     if assignment.state == "delivered":
         return None
     if assignment.state == "evict":
         return "evict"
     if assignment.state == "pending" and asset.status == "ready":
+        if transfer_mode in ("paused", "stopped"):
+            return "queued"
         return "ready"
     return "queued"
 
@@ -109,6 +123,7 @@ async def list_assignments(
     await session.execute(
         update(Client).where(Client.id == client.id).values(last_seen=now),
     )
+    transfer_mode = await _get_transfer_mode(session)
 
     result = await session.execute(
         select(Assignment, Asset)
@@ -124,7 +139,7 @@ async def list_assignments(
     total_assigned_bytes = 0
 
     for assignment, asset in result.all():
-        effective_state = _effective_state(assignment, asset)
+        effective_state = _effective_state(assignment, asset, transfer_mode)
         if effective_state is None:
             continue
 
@@ -151,6 +166,7 @@ async def list_assignments(
             queued_count=queued_count,
             evict_count=evict_count,
         ),
+        transfer_mode=transfer_mode,
     )
 
 
